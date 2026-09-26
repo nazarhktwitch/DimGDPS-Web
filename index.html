@@ -7,7 +7,7 @@
     <title>DimGDPS</title>
     <link rel="icon" type="image/x-icon" href="assets/favicon.ico">
     <link rel="stylesheet" href="assets/style.css">
-    <meta name="description" content="Geometry Dash web port.">
+    <meta name="description" content="Geometry Dash web port for DimGDPS.">
     <meta name="theme-color" content="#C1FB3D">
 
     <!-- - Embeds - -->
@@ -15,7 +15,7 @@
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://dimgdps.ps.fhgdps.com/" />
     <meta property="og:title" content="DimGDPS" />
-    <meta property="og:description" content="Geometry Dash web port." />
+    <meta property="og:description" content="Geometry Dash web port for DimGDPS." />
 
     <!-- Libraries and stuff -->
     <script src="assets/scripts/game/allObjects.js?latest"></script>
@@ -34,7 +34,6 @@
             ];
             window._gdProxyUrl = GD_PROXY_HOSTS[0];
             window._gdProxyHosts = GD_PROXY_HOSTS;
-            var activeIndex = 0;
             var nativeFetch = window.fetch.bind(window);
             function matchingHost(url) {
                 for (var i = 0; i < GD_PROXY_HOSTS.length; i++) {
@@ -42,46 +41,49 @@
                 }
                 return null;
             }
-            function withHost(url, oldHost, newHost) {
-                return newHost + url.slice(oldHost.length);
+            // the GDPS requires gameVersion/binaryVersion on .php POST endpoints
+            var GD_CLIENT_PARAMS = "gameVersion=22&binaryVersion=42";
+            function withClientParams(url, init) {
+                if (url.indexOf(".php") === -1) return init;
+                var method = (init && init.method) || "GET";
+                if (String(method).toUpperCase() !== "POST") return init;
+                if (!init || typeof init.body !== "string") return init;
+                if (init.body.indexOf("gameVersion=") !== -1) return init;
+                var copy = {};
+                for (var key in init) {
+                    if (Object.prototype.hasOwnProperty.call(init, key)) copy[key] = init[key];
+                }
+                copy.body = init.body + (init.body.length ? "&" : "") + GD_CLIENT_PARAMS;
+                return copy;
             }
+            // rewrite GDPS URLs to the local server proxy (/gd/...) so no CORS issues
             window.fetch = function (input, init) {
                 var isRequestObj = (typeof Request !== "undefined") && (input instanceof Request);
                 var url = isRequestObj ? input.url : input;
                 if (typeof url !== "string") {
                     return nativeFetch(input, init);
                 }
-            var oldHost = matchingHost(url);
+                init = withClientParams(url, init);
+                var oldHost = matchingHost(url);
                 if (!oldHost) {
                     return nativeFetch(input, init);
                 }
-                var attempts = 0;
-                var lastError = null;
-                function tryHost(hostIndex) {
-                    var host = GD_PROXY_HOSTS[hostIndex];
-                    var attemptUrl = withHost(url, oldHost, host);
-                    var attemptInput = isRequestObj ? new Request(attemptUrl, input) : attemptUrl;
-
-                    return nativeFetch(attemptInput, init).then(function (res) {
-                        if ((res.status === 429 || res.status === 503) && attempts < GD_PROXY_HOSTS.length - 1) {
-                            attempts++;
-                            var nextIndex = (hostIndex + 1) % GD_PROXY_HOSTS.length;
-                            return tryHost(nextIndex);
+                var canUseLocal = location.protocol === "http:" || location.protocol === "https:";
+                var localUrl = "/gd" + url.slice(oldHost.length);
+                function toRequest(u) {
+                    return isRequestObj ? new Request(u, input) : u;
+                }
+                if (canUseLocal) {
+                    return nativeFetch(toRequest(localUrl), init).then(function (res) {
+                        if (res.status === 429 || res.status === 503) {
+                            return nativeFetch(toRequest(url), init);
                         }
-                        activeIndex = hostIndex;
-                        window._gdProxyUrl = host;
                         return res;
-                    }, function (err) {
-                        lastError = err;
-                        if (attempts < GD_PROXY_HOSTS.length - 1) {
-                            attempts++;
-                            var nextIndex = (hostIndex + 1) % GD_PROXY_HOSTS.length;
-                            return tryHost(nextIndex);
-                        }
-                        throw lastError;
+                    }, function () {
+                        return nativeFetch(toRequest(url), init);
                     });
                 }
-                return tryHost(activeIndex);
+                return nativeFetch(toRequest(url), init);
             };
         })();
     </script>

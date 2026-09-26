@@ -12,8 +12,22 @@ window.currentBall   = localStorage.getItem("iconCurrentBall")   || "player_ball
 window.currentWave   = localStorage.getItem("iconCurrentWave")   || "dart_01";
 window.currentSpider = localStorage.getItem("iconCurrentSpider") || "spider_01";
 window.currentBird   = localStorage.getItem("iconCurrentBird")   || "bird_01";
+// one-time migration: old build saved useDirectInternet=true as its default
+if (!localStorage.getItem("gd_fork_v1")) {
+  if (localStorage.getItem("gd_useDirectInternet") === "true") {
+    localStorage.setItem("gd_useDirectInternet", "false");
+  }
+  try {
+    const savedSettings = JSON.parse(localStorage.getItem("gd_settings") || "null");
+    if (savedSettings && savedSettings.useDirectInternet === true) {
+      savedSettings.useDirectInternet = false;
+      localStorage.setItem("gd_settings", JSON.stringify(savedSettings));
+    }
+  } catch (e) {}
+  localStorage.setItem("gd_fork_v1", "1");
+}
 const storedUseDirectInternet = localStorage.getItem("gd_useDirectInternet");
-window.useDirectInternet = storedUseDirectInternet === null ? true : storedUseDirectInternet === "true";
+window.useDirectInternet = storedUseDirectInternet === null ? false : storedUseDirectInternet === "true";
 window.getGdApiBase = function () {
   if (window.useDirectInternet) return "https://www.boomlings.com/database";
   return (window._gdProxyUrl || "").replace(/\/$/, "");

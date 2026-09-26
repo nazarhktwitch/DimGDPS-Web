@@ -1,9 +1,9 @@
 {
   "name": "dimgdps-web",
   "version": "1.0.0",
-  "description": "Geometry Dash web port",
+  "description": "Geometry Dash web port for DimGDPS",
   "scripts": {
-    "start": "serve . -s -p 3000"
+    "start": "node server.js"
   },
   "author": "DimGDPS",
   "license": "MIT",

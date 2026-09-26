@@ -5590,7 +5590,7 @@ _buildSettingsPopup() {
         practiceMusicSync: false,
         showGlow: true,
         showEditorGlow: false,
-        useDirectInternet: true,
+        useDirectInternet: false,
         enablePortalGuide: true,
         enableOrbGuide: false,
         enableMiniIcon: false,
