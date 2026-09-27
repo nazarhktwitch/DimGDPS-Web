@@ -51,7 +51,7 @@
                 return copy;
             }
             function onFail(url, init) { return function () { return nativeFetch(url, init); }; }
-            // route .php/worker requests through the local proxy (localhost) or corsfix (GitHub Pages)
+            // route .php/worker requests through the local proxy (localhost) only
             window.fetch = function (input, init) {
                 var isRequestObj = (typeof Request !== "undefined") && (input instanceof Request);
                 var url = isRequestObj ? input.url : input;
@@ -59,12 +59,6 @@
                     return nativeFetch(input, init);
                 }
                 init = withClientParams(url, init);
-                if (url.indexOf(WORKER_HOST) === 0) {
-                    if (IS_LOCAL) {
-                        return nativeFetch("/gd/ws" + url.slice(WORKER_HOST.length), init).catch(onFail(url, init));
-                    }
-                    return nativeFetch(PROXY_CORS + url, init).catch(onFail(url, init));
-                }
                 if (url.indexOf(GDPS_HOST) === 0 || url.indexOf(PROXY_CORS) === 0) {
                     if (IS_LOCAL) {
                         return nativeFetch("/gd" + url.slice(GDPS_HOST.length), init).catch(onFail(url, init));
