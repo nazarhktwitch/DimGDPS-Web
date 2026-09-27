@@ -29,22 +29,14 @@
     <!-- workerssdsss nwo-->
     <script>
         (function () {
-            var GD_PROXY_HOSTS = [
-                "https://dimgdps.ps.fhgdps.com"
-            ];
-            window._gdProxyUrl = GD_PROXY_HOSTS[0];
-            window._gdProxyHosts = GD_PROXY_HOSTS;
+            var GDPS_HOST = "https://dimgdps.ps.fhgdps.com";
+            var WORKER_HOST = "https://gdps-proxy.lively-havarti.workers.dev";
+            var PROXY_CORS = "https://proxy.corsfix.com/?";
+            var IS_LOCAL = (location.hostname === "localhost" || location.hostname === "127.0.0.1");
+            window._gdProxyUrl = IS_LOCAL ? GDPS_HOST : "";
             var nativeFetch = window.fetch.bind(window);
-            function matchingHost(url) {
-                for (var i = 0; i < GD_PROXY_HOSTS.length; i++) {
-                    if (url.indexOf(GD_PROXY_HOSTS[i]) === 0) return GD_PROXY_HOSTS[i];
-                }
-                return null;
-            }
             // the GDPS requires gameVersion/binaryVersion on .php POST endpoints
             var GD_CLIENT_PARAMS = "gameVersion=22&binaryVersion=42";
-            // cloudflare worker for custom song audio - route through our local proxy
-            var WORKER_HOST = "https://fetchsongid.lasokar.workers.dev";
             function withClientParams(url, init) {
                 if (url.indexOf(".php") === -1 && url.indexOf(WORKER_HOST) !== 0) return init;
                 var method = (init && init.method) || "GET";
@@ -58,7 +50,8 @@
                 copy.body = init.body + (init.body.length ? "&" : "") + GD_CLIENT_PARAMS;
                 return copy;
             }
-            // rewrite GDPS/worker URLs to the local server proxy (/gd/...) so no CORS issues
+            function onFail(url, init) { return function () { return nativeFetch(url, init); }; }
+            // route .php/worker requests through the local proxy (localhost) or corsfix (GitHub Pages)
             window.fetch = function (input, init) {
                 var isRequestObj = (typeof Request !== "undefined") && (input instanceof Request);
                 var url = isRequestObj ? input.url : input;
@@ -67,34 +60,18 @@
                 }
                 init = withClientParams(url, init);
                 if (url.indexOf(WORKER_HOST) === 0) {
-                    var canUseLocal = location.protocol === "http:" || location.protocol === "https:";
-                    if (canUseLocal) {
-                        return nativeFetch("/gd/ws" + url.slice(WORKER_HOST.length), init).catch(function () {
-                            return nativeFetch(url, init);
-                        });
+                    if (IS_LOCAL) {
+                        return nativeFetch("/gd/ws" + url.slice(WORKER_HOST.length), init).catch(onFail(url, init));
                     }
-                    return nativeFetch(url, init);
+                    return nativeFetch(PROXY_CORS + url, init).catch(onFail(url, init));
                 }
-                var oldHost = matchingHost(url);
-                if (!oldHost) {
-                    return nativeFetch(input, init);
+                if (url.indexOf(GDPS_HOST) === 0 || url.indexOf(PROXY_CORS) === 0) {
+                    if (IS_LOCAL) {
+                        return nativeFetch("/gd" + url.slice(GDPS_HOST.length), init).catch(onFail(url, init));
+                    }
+                    return nativeFetch(PROXY_CORS + url, init).catch(onFail(url, init));
                 }
-                var canUseLocal = location.protocol === "http:" || location.protocol === "https:";
-                var localUrl = "/gd" + url.slice(oldHost.length);
-                function toRequest(u) {
-                    return isRequestObj ? new Request(u, input) : u;
-                }
-                if (canUseLocal) {
-                    return nativeFetch(toRequest(localUrl), init).then(function (res) {
-                        if (res.status === 429 || res.status === 503) {
-                            return nativeFetch(toRequest(url), init);
-                        }
-                        return res;
-                    }, function () {
-                        return nativeFetch(toRequest(url), init);
-                    });
-                }
-                return nativeFetch(toRequest(url), init);
+                return nativeFetch(input, init);
             };
         })();
     </script>
