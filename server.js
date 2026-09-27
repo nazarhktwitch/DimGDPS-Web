@@ -207,6 +207,18 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // cloudflare song-id worker proxy: /gd/ws?id=XXX -> https://fetchsongid.lasokar.workers.dev/?id=XXX
+  if (url.pathname === "/gd/ws" || url.pathname.startsWith("/gd/ws/")) {
+    const songId = url.searchParams.get("id");
+    if (!songId) {
+      res.writeHead(400, { "Access-Control-Allow-Origin": "*" });
+      res.end("Missing id parameter");
+      return;
+    }
+    const target = "https://fetchsongid.lasokar.workers.dev/?id=" + encodeURIComponent(songId);
+    return proxyTo(res, target, req.method, Buffer.alloc(0), req.headers);
+  }
+
   // GDPS API proxy: /gd/getGJLevels21.php -> https://dimgdps.ps.fhgdps.com/getGJLevels21.php
   if (url.pathname === "/gd" || url.pathname.startsWith("/gd/")) {
     const target = GDPS_ORIGIN + url.pathname.slice(3) + url.search;

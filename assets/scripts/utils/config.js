@@ -12,22 +12,8 @@ window.currentBall   = localStorage.getItem("iconCurrentBall")   || "player_ball
 window.currentWave   = localStorage.getItem("iconCurrentWave")   || "dart_01";
 window.currentSpider = localStorage.getItem("iconCurrentSpider") || "spider_01";
 window.currentBird   = localStorage.getItem("iconCurrentBird")   || "bird_01";
-// one-time migration: old build saved useDirectInternet=true as its default
-if (!localStorage.getItem("gd_fork_v1")) {
-  if (localStorage.getItem("gd_useDirectInternet") === "true") {
-    localStorage.setItem("gd_useDirectInternet", "false");
-  }
-  try {
-    const savedSettings = JSON.parse(localStorage.getItem("gd_settings") || "null");
-    if (savedSettings && savedSettings.useDirectInternet === true) {
-      savedSettings.useDirectInternet = false;
-      localStorage.setItem("gd_settings", JSON.stringify(savedSettings));
-    }
-  } catch (e) {}
-  localStorage.setItem("gd_fork_v1", "1");
-}
-const storedUseDirectInternet = localStorage.getItem("gd_useDirectInternet");
-window.useDirectInternet = storedUseDirectInternet === null ? false : storedUseDirectInternet === "true";
+// this fork always routes through the local proxy; direct internet is not used
+window.useDirectInternet = false;
 window.getGdApiBase = function () {
   if (window.useDirectInternet) return "https://www.boomlings.com/database";
   return (window._gdProxyUrl || "").replace(/\/$/, "");
@@ -44,6 +30,9 @@ window.fetchGdApi = async function (path, options = {}) {
   const urls = [];
   if (directUrl) urls.push(directUrl);
   if (proxyUrl && proxyUrl !== directUrl) urls.push(proxyUrl);
+  if (options.method === "POST" && typeof options.body === "string" && !options.headers) {
+    options = Object.assign({}, options, { headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+  }
   let lastError = null;
   for (const url of urls) {
     try {

@@ -1131,10 +1131,10 @@ this._menuUpdateLogBtn = this.add.image(screenWidth - 30 - 50, 33, "GJ_WebSheet"
                 this._fitBitmapText(songAuthorText, songBoxW - 100);
               }
 
-              if (songName && typeof songNameText !== "undefined" && songNameText) {
-                songNameText.setText(songName);
-                this._fitBitmapText(songTitleText, songBoxW - 100);
-              }
+               if (songName && typeof songNameText !== "undefined" && songNameText) {
+                 songNameText.setText(songName);
+                 this._fitBitmapText(songNameText, songBoxW - 100);
+               }
             })
             .catch(err => {
               console.warn("Failed to fetch song author:", err);

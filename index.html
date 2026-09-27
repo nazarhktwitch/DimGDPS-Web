@@ -43,8 +43,10 @@
             }
             // the GDPS requires gameVersion/binaryVersion on .php POST endpoints
             var GD_CLIENT_PARAMS = "gameVersion=22&binaryVersion=42";
+            // cloudflare worker for custom song audio - route through our local proxy
+            var WORKER_HOST = "https://fetchsongid.lasokar.workers.dev";
             function withClientParams(url, init) {
-                if (url.indexOf(".php") === -1) return init;
+                if (url.indexOf(".php") === -1 && url.indexOf(WORKER_HOST) !== 0) return init;
                 var method = (init && init.method) || "GET";
                 if (String(method).toUpperCase() !== "POST") return init;
                 if (!init || typeof init.body !== "string") return init;
@@ -56,7 +58,7 @@
                 copy.body = init.body + (init.body.length ? "&" : "") + GD_CLIENT_PARAMS;
                 return copy;
             }
-            // rewrite GDPS URLs to the local server proxy (/gd/...) so no CORS issues
+            // rewrite GDPS/worker URLs to the local server proxy (/gd/...) so no CORS issues
             window.fetch = function (input, init) {
                 var isRequestObj = (typeof Request !== "undefined") && (input instanceof Request);
                 var url = isRequestObj ? input.url : input;
@@ -64,6 +66,15 @@
                     return nativeFetch(input, init);
                 }
                 init = withClientParams(url, init);
+                if (url.indexOf(WORKER_HOST) === 0) {
+                    var canUseLocal = location.protocol === "http:" || location.protocol === "https:";
+                    if (canUseLocal) {
+                        return nativeFetch("/gd/ws" + url.slice(WORKER_HOST.length), init).catch(function () {
+                            return nativeFetch(url, init);
+                        });
+                    }
+                    return nativeFetch(url, init);
+                }
                 var oldHost = matchingHost(url);
                 if (!oldHost) {
                     return nativeFetch(input, init);
