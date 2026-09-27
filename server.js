@@ -207,7 +207,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // cloudflare song-id worker proxy: /gd/ws?id=XXX -> https://fetchsongid.lasokar.workers.dev/?id=XXX
+  // cloudflare song-id worker proxy: /gd/ws?id=XXX -> https://fetchsongid.lasokar.workers.dev/?id=XXX (for local development only)
   if (url.pathname === "/gd/ws" || url.pathname.startsWith("/gd/ws/")) {
     const songId = url.searchParams.get("id");
     if (!songId) {
@@ -215,7 +215,12 @@ const server = http.createServer((req, res) => {
       res.end("Missing id parameter");
       return;
     }
-    const target = "https://fetchsongid.lasokar.workers.dev/?id=" + encodeURIComponent(songId);
+    const target = IS_LOCAL ? "https://fetchsongid.lasokar.workers.dev/?id=" + encodeURIComponent(songId) : "";
+    if (!IS_LOCAL) {
+      res.writeHead(400, { "Access-Control-Allow-Origin": "*" });
+      res.end("Invalid endpoint for GitHub Pages");
+      return;
+    }
     return proxyTo(res, target, req.method, Buffer.alloc(0), req.headers);
   }
 

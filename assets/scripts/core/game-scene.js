@@ -1086,7 +1086,9 @@ this._menuUpdateLogBtn = this.add.image(screenWidth - 30 - 50, 33, "GJ_WebSheet"
           updateBtnState();
           abortController = new AbortController();
           try {
-            const workerUrl = `https://fetchsongid.lasokar.workers.dev/?id=${encodeURIComponent(lvl.customSongID)}`;
+            const PROXY_BASE = (window._gdProxyUrl || "").replace(/\/$/, "");
+            const workerUrl = PROXY_BASE ? `${PROXY_BASE}/getGJSongInfo.php?songID=${encodeURIComponent(lvl.customSongID)}&secret=Wmfd2893gb7` : null;
+            if (!workerUrl) throw new Error("Song info not available");
             const audioRes = await fetch(workerUrl, { signal: abortController.signal });
             if (!audioRes.ok) throw new Error("Failed to download audio from worker");
             const arrayBuf = await audioRes.arrayBuffer();
