@@ -4240,8 +4240,8 @@ if (this.p.isFlying || this.p.isUfo) {
     const waveHitSize = this.p.isMini ? 6 : 9;
     const pieceWidth = _0x2f5078 + centerX;
     const previousWorldX = Number.isFinite(this._lastCollisionWorldX) ? this._lastCollisionWorldX : pieceWidth;
-    const playersY = this.p.y;
-    const playersLastY = this.p.lastY;
+    let playersY = this.p.y;
+    let playersLastY = this.p.lastY;
     const previousCollisionWorldY = Number.isFinite(this._lastCollisionWorldY) ? this._lastCollisionWorldY : playersLastY;
     const gamemodeAddition = this.p.isWave ? 0 : (this.p.isFlying || this.p.isUfo ? 12 : 20);
     const _letterHalf = playerSize;
@@ -4348,7 +4348,11 @@ if (this.p.isFlying || this.p.isUfo) {
               _boostedThisStep = true;
               _teleportedThisStep = true;
               this._lastCollisionWorldY = targetY;
-              break;
+              // Keep scanning the remaining objects this same tick at the
+              // teleported Y (GD does the same: portals placed at the
+              // teleport target must trigger on the arrival tick).
+              playersY = targetY;
+              playersLastY = targetY;
             }
           }
         } else if (_colType === "portal_fly") {
@@ -5583,7 +5587,12 @@ if (this.p.isFlying || this.p.isUfo) {
     const _resetWorldY = Number(this.p?.y);
     this._lastCollisionWorldX = Number.isFinite(_resetWorldX) ? _resetWorldX : null;
     this._lastCollisionWorldY = Number.isFinite(_resetWorldY) ? _resetWorldY : null;
-    this._ignoreTeleportUntilClear = true;
+    // NOTE: do NOT set _ignoreTeleportUntilClear here. On level start/restart
+    // the player may already overlap a teleport portal placed at x<=0; eating
+    // it here made such portals unusable (checkpoint respawns are already
+    // guarded by state.ignorePortals). Keep the flag false so the portal
+    // triggers like in GD.
+    this._ignoreTeleportUntilClear = false;
     this.setCubeVisible(true);
     this.setShipVisible(false);
     this.setBallVisible(false);

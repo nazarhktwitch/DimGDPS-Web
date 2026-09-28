@@ -2939,7 +2939,14 @@ window.LevelObject = class LevelObject {
         this._addCollisionToSection(collider);
       }
     } else if (objectDef.type === portalType) {
-      const portalW = objectDef.gridW * a;
+      // Portal trigger box is at least one grid block wide (60 world units).
+      // Several portal sprites are sub-block (gravity/teleport = 0.833 block,
+      // gravity toggle = 0.792 block), and using the raw sprite width left a
+      // portal placed just behind the spawn (x = -29, one unit left of 0)
+      // unreachable: the player box only reaches 27.5 units with the sprite
+      // width. GD still triggers those start portals, so floor the trigger to
+      // one block instead of the decorative sprite size.
+      const portalW = Math.max(objectDef.gridW * a, 60);
       const portalH = objectDef.gridH * a;
       const portalSub = objectDef.sub || {
         10: "gravity_flip",
