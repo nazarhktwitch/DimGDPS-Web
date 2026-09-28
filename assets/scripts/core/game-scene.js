@@ -1087,10 +1087,20 @@ this._menuUpdateLogBtn = this.add.image(screenWidth - 30 - 50, 33, "GJ_WebSheet"
           abortController = new AbortController();
           try {
             const PROXY_BASE = (window._gdProxyUrl || "").replace(/\/$/, "");
-            const workerUrl = PROXY_BASE ? `${PROXY_BASE}/getGJSongInfo.php?songID=${encodeURIComponent(lvl.customSongID)}&secret=Wmfd2893gb7` : null;
-            if (!workerUrl) throw new Error("Song info not available");
-            const audioRes = await fetch(workerUrl, { signal: abortController.signal });
-            if (!audioRes.ok) throw new Error("Failed to download audio from worker");
+            if (!PROXY_BASE) throw new Error("Proxy not configured");
+            const infoRes = await fetch(`${PROXY_BASE}/getGJSongInfo.php`, {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: `songID=${encodeURIComponent(lvl.customSongID)}&secret=Wmfd2893gb7`
+            });
+            const infoText = infoRes.ok ? await infoRes.text() : "";
+            const infoParts = infoText.split("~|~");
+            const infoMap = {};
+            for (let i = 0; i + 1 < infoParts.length; i += 2) infoMap[infoParts[i]] = infoParts[i + 1];
+            const songUrl = decodeURIComponent((infoMap["10"] || "").trim());
+            if (!songUrl) throw new Error("Song URL not found");
+            const audioRes = await fetch(songUrl.includes("geometrydashfiles.b-cdn.net") ? songUrl : `${PROXY_BASE}/audio-proxy?url=${encodeURIComponent(songUrl)}`, { signal: abortController.signal });
+            if (!audioRes.ok) throw new Error("Failed to download audio");
             const arrayBuf = await audioRes.arrayBuffer();
             await window.SongDB.save(lvl.customSongID, arrayBuf, this.sound.context);
           } catch (err) {
@@ -1222,18 +1232,21 @@ this._menuUpdateLogBtn = this.add.image(screenWidth - 30 - 50, 33, "GJ_WebSheet"
             }
             let arrayBuf = await window.SongDB.load(customSongID);
             if (!arrayBuf) {
-              const workerUrl = `https://fetchsongid.lasokar.workers.dev/?id=${encodeURIComponent(customSongID)}`;
-              let audioRes = await fetch(workerUrl);
-              if (!audioRes.ok) {
-                const songUrl = decodeURIComponent((ngMap["10"] || "").trim());
-                if (songUrl) {
-                  const proxiedUrl = songUrl.includes("geometrydashfiles.b-cdn.net")
-                    ? songUrl
-                    : `${PROXY_BASE}/audio-proxy?url=${encodeURIComponent(songUrl)}`;
-                  audioRes = await fetch(proxiedUrl);
-                }
+              const PROXY_BASE = (window._gdProxyUrl || "").replace(/\/$/, "");
+              if (!PROXY_BASE) {
+                console.warn("Failed to load custom song: window._gdProxyUrl is not configured");
+                return null;
               }
-              if (audioRes && audioRes.ok) {
+              const songUrl = decodeURIComponent((ngMap["10"] || "").trim());
+              if (songUrl) {
+                const proxiedUrl = songUrl.includes("geometrydashfiles.b-cdn.net")
+                  ? songUrl
+                  : `${PROXY_BASE}/audio-proxy?url=${encodeURIComponent(songUrl)}`;
+                let audioRes = await fetch(proxiedUrl);
+                if (!audioRes.ok) {
+                  console.warn("Failed to download custom song from proxied URL");
+                  return null;
+                }
                 arrayBuf = await audioRes.arrayBuffer();
                 await window.SongDB.save(customSongID, arrayBuf);
               }
