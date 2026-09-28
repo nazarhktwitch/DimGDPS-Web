@@ -3592,7 +3592,7 @@ if (this.p.isFlying || this.p.isUfo) {
     const nearbyObjects = this._gameLayer?.getNearbySectionObjects?.(playerWorldX) || [];
 
     for (const gameObj of nearbyObjects) {
-      if (!gameObj || gameObj.type !== jumpRingType || this._isObjectActivated(gameObj)) continue;
+      if (!gameObj || gameObj.type !== jumpRingType || gameObj.noTouch || this._isObjectActivated(gameObj)) continue;
 
       const hasCircleHitbox = gameObj.hitbox_radius !== undefined && gameObj.hitbox_radius !== null;
       if (hasCircleHitbox) {
@@ -3891,7 +3891,7 @@ if (this.p.isFlying || this.p.isUfo) {
     let nearestDistance = Infinity;
 
     for (const obj of nearbyObjects) {
-      if (!obj || (obj.type !== hazardType && obj.type !== "hazard")) continue;
+      if (!obj || obj.noTouch || (obj.type !== hazardType && obj.type !== "hazard")) continue;
       const bounds = this._getSpiderSearchBounds(obj);
       if (playerWorldX + xPad <= bounds.left || playerWorldX - xPad >= bounds.right) continue;
       if (bounds.upper < fromY - yPad || bounds.lower > toY + yPad) continue;
@@ -3927,7 +3927,7 @@ if (this.p.isFlying || this.p.isUfo) {
 
     const nearbyObjects = this._gameLayer.getNearbySectionObjects(playerWorldX);
     for (const obj of nearbyObjects) {
-      if (obj.type !== solidType && obj.type !== "solid") continue;
+      if (obj.noTouch || (obj.type !== solidType && obj.type !== "solid")) continue;
       const bounds = this._getSpiderSearchBounds(obj);
       if (playerWorldX + xPad <= bounds.left || playerWorldX - xPad >= bounds.right) continue;
 
@@ -4211,6 +4211,7 @@ if (this.p.isFlying || this.p.isUfo) {
     let _slopeBlockedThisStep = false;
     const _0x198534 = this._gameLayer.getNearbySectionObjects(pieceWidth);
     for (let gameObj of _0x198534) {
+      if (gameObj.noTouch) continue;
       let left = gameObj.x - gameObj.w / 2;
       let right = gameObj.x + gameObj.w / 2;
       let top = gameObj.y - gameObj.h / 2;
@@ -5112,6 +5113,7 @@ if (this.p.isFlying || this.p.isUfo) {
     const playerY = this.p.y;
     const nearbyObjects = this._gameLayer.getNearbySectionObjects(camXCenter);
     for (let nearObject of nearbyObjects) {
+      if (nearObject.noTouch) continue;
       let objXCenter = nearObject.x - camX;
       let objYCenter = b(nearObject.y) + camY;
       let hitboxColor = 65280;

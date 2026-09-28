@@ -8812,6 +8812,7 @@ _applyMirrorEffect() {
     let portalMode = null;
 
     for (const gameObj of portalObjects) {
+      if (gameObj?.noTouch) continue;
       const mode = this._getGamemodePortalMode(gameObj?.type);
       if (!mode) continue;
 

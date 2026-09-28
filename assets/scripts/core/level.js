@@ -134,6 +134,7 @@ function parseObject(objectString) {
       dualMode: parseInt(objectData['kA8'] ?? '0', 10),
       mirrored: parseInt(objectData['kA28'] ?? '0', 10),
       flipGravity: '1' === (objectData['kA11'] ?? '0'),
+      noTouch: objectData["121"] === "1",
       _raw: objectData
     };
   }
@@ -2838,6 +2839,7 @@ window.LevelObject = class LevelObject {
 
   if (objectDef) {
     const registerCollider = col => {
+      col.noTouch = levelObj.noTouch === true;
       col._baseX = col.x;
       col._baseY = col.y;
       col._baseRotationDegrees = col.rotationDegrees || 0;
