@@ -136,6 +136,7 @@ const atlasList = [
   "GJ_GameSheet04",
   "GJ_GameSheetEditor",
   "GJ_GameSheetGlow",
+  "GJ_GameSheetGlowFull",
   "GJ_GameSheetIcons",
   "GJ_LaunchSheet",
   "player_ball_00",

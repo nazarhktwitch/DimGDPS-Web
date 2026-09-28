@@ -251,6 +251,7 @@ class BootScene extends Phaser.Scene {
       this.load.atlas("GJ_GameSheet04", "assets/sheets/GJ_GameSheet04.png", "assets/sheets/GJ_GameSheet04.json");
       this.load.atlas("GJ_GameSheetEditor", "assets/sheets/GJ_GameSheetEditor.png", "assets/sheets/GJ_GameSheetEditor.json");
       this.load.atlas("GJ_GameSheetGlow", "assets/sheets/GJ_GameSheetGlow.png", "assets/sheets/GJ_GameSheetGlow.json");
+      this.load.atlas("GJ_GameSheetGlowFull", "assets/sheets/GJ_GameSheetGlowFull.png", "assets/sheets/GJ_GameSheetGlowFull.json");
       this.load.atlas("GJ_GameSheetIcons", "assets/sheets/GJ_GameSheetIcons.png", "assets/sheets/GJ_GameSheetIcons.json");
       this.load.atlas("Wavesheet", "assets/sheets/Wavesheet.png", "assets/sheets/Wavesheet.json");
       this.load.json("Spider_AnimDesc", "assets/sheets/Spider_AnimDesc.json");

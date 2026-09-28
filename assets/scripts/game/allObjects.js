@@ -1889,7 +1889,7 @@ window.allobjects = function() {
   },
   "125": {
     "type": "deco",
-    "frame": "d_smallBall_01_001.png",
+    "frame": "d_small_ball_01_001.png",
     "gridW": 0,
     "gridH": 0,
     "default_detail_color_channel": -1,
@@ -1898,7 +1898,7 @@ window.allobjects = function() {
   },
   "126": {
     "type": "deco",
-    "frame": "d_smallBall_02_001.png",
+    "frame": "d_small_ball_02_001.png",
     "gridW": 0,
     "gridH": 0,
     "default_detail_color_channel": -1,
@@ -1907,7 +1907,7 @@ window.allobjects = function() {
   },
   "127": {
     "type": "deco",
-    "frame": "d_smallBall_03_001.png",
+    "frame": "d_small_ball_03_001.png",
     "gridW": 0,
     "gridH": 0,
     "default_detail_color_channel": -1,
@@ -1916,7 +1916,7 @@ window.allobjects = function() {
   },
   "128": {
     "type": "deco",
-    "frame": "d_smallBall_04_001.png",
+    "frame": "d_small_ball_04_001.png",
     "gridW": 0,
     "gridH": 0,
     "default_detail_color_channel": -1,
@@ -2152,7 +2152,7 @@ window.allobjects = function() {
   "149": {
     "can_color": true,
     "default_base_color_channel": 1006,
-    "frame": "noen",
+    "frame": "none",
     "gridH": 1,
     "gridW": 1,
     "spritesheet": "GJ_GameSheet-uhd",
