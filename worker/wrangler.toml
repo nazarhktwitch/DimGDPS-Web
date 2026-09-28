@@ -1,0 +1,6 @@
+name = "gdps-proxy"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+[observability]
+enabled = false

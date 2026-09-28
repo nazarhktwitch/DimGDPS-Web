@@ -30,8 +30,7 @@
     <script>
         (function () {
             var GDPS_HOST = "https://dimgdps.ps.fhgdps.com";
-            var WORKER_HOST = "https://gdps-proxy.marvelous-peak.workers.dev";
-            var PROXY_CORS = "https://proxy.corsfix.com/?";
+            var WORKER_HOST = "https://gdps-proxy.dimgdps.workers.dev";
             var IS_LOCAL = (location.hostname === "localhost" || location.hostname === "127.0.0.1");
             window._gdProxyUrl = IS_LOCAL ? GDPS_HOST : WORKER_HOST;
             var nativeFetch = window.fetch.bind(window);
@@ -59,11 +58,11 @@
                     return nativeFetch(input, init);
                 }
                 init = withClientParams(url, init);
-                if (url.indexOf(GDPS_HOST) === 0 || url.indexOf(PROXY_CORS) === 0) {
+                if (url.indexOf(GDPS_HOST) === 0) {
                     if (IS_LOCAL) {
                         return nativeFetch("/gd" + url.slice(GDPS_HOST.length), init).catch(onFail(url, init));
                     }
-                    return nativeFetch(PROXY_CORS + url, init).catch(onFail(url, init));
+                    return nativeFetch(WORKER_HOST + url.slice(GDPS_HOST.length), init).catch(onFail(url, init));
                 }
                 return nativeFetch(input, init);
             };
