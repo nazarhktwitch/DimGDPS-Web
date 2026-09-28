@@ -4228,8 +4228,10 @@ if (this.p.isFlying || this.p.isUfo) {
     this.noclipStats.totalFrames++;
     this.p.diedThisFrame = false;
     if (this.p._spiderTeleportNoclipDeathPending) {
-      this.p.diedThisFrame = true;
       this.p._spiderTeleportNoclipDeathPending = false;
+      if (window.noClip) {
+        this.p.diedThisFrame = true;
+      }
     }
     if (!this.p.upKeyDown || (this.p.upKeyDown && !this.p.wasUpKeyDown)) {
       this.p._orbActivationConsumedForPress = false;
@@ -4893,6 +4895,10 @@ if (this.p.isFlying || this.p.isUfo) {
             gameObj, pieceWidth, playersY, playersLastY, left, right, top, bottom, playerSize, waveHitSize, gamemodeAddition
           );
           if (slopeResult.died) {
+            if (window.noClip) {
+              this.p.diedThisFrame = true;
+              continue;
+            }
             if (!(this.p.isWave && this._letterFlags && this._letterFlags.D)) {
               this.killPlayer();
               return;
@@ -4937,7 +4943,7 @@ if (this.p.isFlying || this.p.isUfo) {
             : _0x146a97 >= bottom - playerSize);
           if (iscolliding && !isstandingOnAPlatform && !_slopeLeadIn) {
             if (window.noClip) {
-
+              this.p.diedThisFrame = true;
               continue;
             }
             if (this.breakabletheblock(gameObj)) {
@@ -5036,6 +5042,10 @@ if (this.p.isFlying || this.p.isUfo) {
                 if (this._letterFlags && this._letterFlags.H && this._letterBlockModeOk()) {
                   this.p.y = top - playerSize;
                   this.p.yVelocity = 0;
+                  continue;
+                }
+                if (window.noClip) {
+                  this.p.diedThisFrame = true;
                   continue;
                 }
                 this.killPlayer();
@@ -5174,8 +5184,12 @@ if (this.p.isFlying || this.p.isUfo) {
       this.p.onCeiling = true;
     }
     if (this.p.y > 1890*4) {
-      this.killPlayer();
-      return;
+      if (window.noClip) {
+        this.p.diedThisFrame = true;
+      } else {
+        this.killPlayer();
+        return;
+      }
     }
     if (this._ignoreTeleportUntilClear && !_touchingTeleportDuringRespawnIgnore) {
       this._ignoreTeleportUntilClear = false;
