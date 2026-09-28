@@ -3516,7 +3516,8 @@ if (this.p.isFlying || this.p.isUfo) {
       this.p.pendingVelocity = null;
     }
     if (this.p.isDashing) {
-      if (!this.p.upKeyDown || this.p.onGround) {
+      const _sFlags = this._letterFlagsNow();
+      if (!this.p.upKeyDown || this.p.onGround || (_sFlags && _sFlags.S)) {
         this.p.isDashing = false;
         this.p.dashYVelocity = 0;
       } else {
@@ -3536,7 +3537,7 @@ if (this.p.isFlying || this.p.isUfo) {
       this._updateSpiderJump(_0x3d1c6f);
     } else if (this.p.isRobot) {
       this._updateRobotJump(_0x3d1c6f);
-    } else if (this.p.upKeyDown && this.p.canJump) {
+    } else if (this.p.upKeyDown && this.p.canJump && this._jBlockAllowsJump()) {
       this.p.isJumping = true;
       this.p.onGround = false;
       this.p.canJump = false;
@@ -4172,6 +4173,57 @@ if (this.p.isFlying || this.p.isUfo) {
     return false;
   }
 
+  _queryLetterFlags(cx, cy, halfW, halfH) {
+    const lvl = this._gameLayer;
+    if (!lvl || typeof lvl.getLetterFlagsAt !== "function") return null;
+    return lvl.getLetterFlagsAt(cx, cy, halfW, halfH);
+  }
+  _solidOverlapAt(cx, cy, halfW, halfH, exclude) {
+    const secs = this._gameLayer && this._gameLayer._collisionSections;
+    if (!secs || !secs.length) return false;
+    const sec = Math.max(0, Math.floor(cx / 400));
+    const from = Math.max(0, sec - 1);
+    const to = Math.min(secs.length - 1, sec + 1);
+    for (let i = from; i <= to; i++) {
+      const arr = secs[i];
+      if (!arr) continue;
+      for (let j = 0; j < arr.length; j++) {
+        const o = arr[j];
+        if (o === exclude || o.type !== solidType) continue;
+        const ow = o.w || 60;
+        const oh = o.h || 60;
+        if (Math.abs(cx - o.x) <= halfW + ow / 2 && Math.abs(cy - o.y) <= halfH + oh / 2) return true;
+      }
+    }
+    return false;
+  }
+  _resolveWaveDragSnap(gameObj, top, bottom, playerSize) {
+    const px = Number.isFinite(this._lastCollisionWorldX) ? this._lastCollisionWorldX : (this._scene?._playerWorldX || 0);
+    const aboveY = bottom + playerSize;
+    const belowY = top - playerSize;
+    const half = playerSize;
+    const blockedAbove = this._solidOverlapAt(px, aboveY, half, half, gameObj);
+    const blockedBelow = this._solidOverlapAt(px, belowY, half, half, gameObj);
+    let targetY;
+    if (!blockedAbove && blockedBelow) targetY = aboveY;
+    else if (blockedAbove && !blockedBelow) targetY = belowY;
+    else targetY = this.p.y >= gameObj.y ? aboveY : belowY;
+    this.p.y = targetY;
+    this.p.yVelocity = 0;
+  }
+  _letterFlagsNow() {
+    const half = this.p.isMini ? 18 : 30;
+    const wx = Number.isFinite(this._lastCollisionWorldX) ? this._lastCollisionWorldX : (this._scene?._playerWorldX || 0);
+    return this._queryLetterFlags(wx, this.p.y, half, half);
+  }
+  _letterBlockModeOk() {
+    return !this.p.isFlying && !this.p.isWave && !this.p.isUfo && !this.p.isBall && !this.p.isSwing;
+  }
+  _jBlockAllowsJump() {
+    const f = this._letterFlagsNow();
+    if (!f || !f.J) return true;
+    return this.p.upKeyDown && !this.p.wasUpKeyDown;
+  }
   checkCollisions(_0x2f5078) {
     this.noclipStats.totalFrames++;
     this.p.diedThisFrame = false;
@@ -4190,6 +4242,8 @@ if (this.p.isFlying || this.p.isUfo) {
     const playersLastY = this.p.lastY;
     const previousCollisionWorldY = Number.isFinite(this._lastCollisionWorldY) ? this._lastCollisionWorldY : playersLastY;
     const gamemodeAddition = this.p.isWave ? 0 : (this.p.isFlying || this.p.isUfo ? 12 : 20);
+    const _letterHalf = playerSize;
+    this._letterFlags = this._queryLetterFlags(pieceWidth, playersY, _letterHalf, _letterHalf);
     this.p.collideTop = 0;
     this.p.collideBottom = 0;
     this.p.onCeiling = false;
@@ -4582,7 +4636,12 @@ if (this.p.isFlying || this.p.isUfo) {
           this.p.touchingRing = true;
           if (!this._isObjectActivated(gameObj) && _needsClick) {
             this._orbpadHitEffect(gameObj, true);
-            if (_isDash) {
+            if (_isDash && this._letterFlags && this._letterFlags.S) {
+              this._setObjectActivated(gameObj, true);
+              _orbInputConsumedThisStep = true;
+              this._consumeOrbActivationInput();
+              this._markActivatedOrbSprites(gameObj);
+            } else if (_isDash) {
               const dashHoldTicks = this._getDashHoldTicks(gameObj) + 1;
               this._setDashHoldTicks(gameObj, dashHoldTicks);
               if (dashHoldTicks < 2) {
@@ -4632,6 +4691,27 @@ if (this.p.isFlying || this.p.isUfo) {
                 this._syncOtherDualGravityForBlueBoost();
                 _boostedThisStep = true;
               } else if (_orbId === 444) {
+                const _spPlayerSize = this.p.isMini ? 18 : 30;
+                const _spFloorY = this._gameLayer.getFloorY();
+                const _spCeilY  = this._gameLayer.getCeilingY() || f;
+                if (!this.p.gravityFlipped) {
+                  this.p.y = _spCeilY - _spPlayerSize;
+                  this.flipGravity(true, 1.0);
+                  this.playGravityEffect(true);
+                } else {
+                  this.p.y = _spFloorY + _spPlayerSize;
+                  this.flipGravity(false, 1.0);
+                  this.playGravityEffect(false);
+                }
+                this._syncOtherDualGravityForBlueBoost();
+                this.p.yVelocity = 0;
+                this.p.onGround = false;
+                this.p.canJump = false;
+                this.p.isJumping = false;
+                this.runRotateAction();
+                _boostedThisStep = true;
+                this._markActivatedOrbSprites(gameObj);
+              } else if (_orbId === 3004) {
                 const _spPlayerSize = this.p.isMini ? 18 : 30;
                 const _spFloorY = this._gameLayer.getFloorY();
                 const _spCeilY  = this._gameLayer.getCeilingY() || f;
@@ -4813,8 +4893,10 @@ if (this.p.isFlying || this.p.isUfo) {
             gameObj, pieceWidth, playersY, playersLastY, left, right, top, bottom, playerSize, waveHitSize, gamemodeAddition
           );
           if (slopeResult.died) {
-            this.killPlayer();
-            return;
+            if (!(this.p.isWave && this._letterFlags && this._letterFlags.D)) {
+              this.killPlayer();
+              return;
+            }
           }
           if (slopeResult.landed && slopeResult.candidate) {
             const cand = slopeResult.candidate;
@@ -4860,6 +4942,23 @@ if (this.p.isFlying || this.p.isUfo) {
             }
             if (this.breakabletheblock(gameObj)) {
               continue;
+            }
+            if (this.p.isWave && this._letterFlags && this._letterFlags.D) {
+              this._resolveWaveDragSnap(gameObj, top, bottom, playerSize);
+              continue;
+            }
+            if (this._letterFlags && (this._letterFlags.H || this._letterFlags.F) && this._letterBlockModeOk()) {
+              const _hfInsideX = pieceWidth >= left && pieceWidth <= right;
+              const _hfHeadUp = _hfInsideX && !this.p.gravityFlipped && this.p.yVelocity > 0 && playersLastY + _0x55559d <= top && playersY + _0x55559d > top;
+              const _hfHeadDown = _hfInsideX && this.p.gravityFlipped && this.p.yVelocity < 0 && playersLastY - _0x55559d >= bottom && playersY - _0x55559d < bottom;
+              if (_hfHeadUp || _hfHeadDown) {
+                this.p.y = _hfHeadUp ? top - playerSize : bottom + playerSize;
+                this.p.yVelocity = 0;
+                if (this._letterFlags.F) {
+                  this.flipGravity(_hfHeadUp, 1);
+                }
+                continue;
+              }
             }
             this.killPlayer();
             return;
@@ -4925,6 +5024,20 @@ if (this.p.isFlying || this.p.isUfo) {
                 if (this.breakabletheblock(gameObj)) {
                   continue;
                 }
+                if (this._letterFlags && this._letterFlags.F && this._letterBlockModeOk()) {
+                  this.p.y = top - playerSize;
+                  this.p.yVelocity = 0;
+                  this.flipGravity(true, 1);
+                  this.hitGround();
+                  this.p.onCeiling = true;
+                  this.p.collideTop = top;
+                  continue;
+                }
+                if (this._letterFlags && this._letterFlags.H && this._letterBlockModeOk()) {
+                  this.p.y = top - playerSize;
+                  this.p.yVelocity = 0;
+                  continue;
+                }
                 this.killPlayer();
                 return;
               }
@@ -4976,7 +5089,7 @@ if (this.p.isFlying || this.p.isUfo) {
     if (_slopeKillPending && !bestSlopeCandidate && !_0x30410f) {
       if (window.noClip) {
         this.p.diedThisFrame = true;
-      } else {
+      } else if (!(this.p.isWave && this._letterFlags && this._letterFlags.D)) {
         this.killPlayer();
         return;
       }
@@ -4984,7 +5097,7 @@ if (this.p.isFlying || this.p.isUfo) {
     if (this.p.collideTop !== 0 && this.p.collideBottom !== 0) {
       if (Math.abs(this.p.collideTop - this.p.collideBottom) < 48) {
         if (window.noClip) this.p.diedThisFrame = true;
-        if (!window.noClip) {
+        if (!window.noClip && !(this.p.isWave && this._letterFlags && this._letterFlags.D)) {
           this.killPlayer();
           return;
         }
@@ -5005,6 +5118,16 @@ if (this.p.isFlying || this.p.isUfo) {
           } else if (this.p.gravityFlipped && iscube && this.p.yVelocity < -0.5) {
             if (window.noClip) {
               this.p.diedThisFrame = true;
+            } else if (this._letterFlags && this._letterFlags.F && this._letterBlockModeOk()) {
+              this.p.y = _0x3020c8 + _effectiveSize;
+              this.flipGravity(false, 1);
+              this.p.yVelocity = 0;
+              this.hitGround();
+            } else if (this._letterFlags && this._letterFlags.H && this._letterBlockModeOk()) {
+              this.p.y = _0x3020c8 + _effectiveSize;
+              this.p.yVelocity = 0;
+              this.hitGround();
+              this.p.onCeiling = true;
             } else {
               this.killPlayer();
               return;

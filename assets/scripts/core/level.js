@@ -1,3 +1,5 @@
+const LETTER_BLOCK_IDS = { 1755: "D", 1813: "J", 1829: "S", 1859: "H", 2866: "F" };
+
 class Collider {
   constructor(objType, xPos, yPos, width, height, rotation = 0) {
     this.type = objType;
@@ -638,6 +640,7 @@ window.LevelObject = class LevelObject {
     this._flyVisualCeilingInset = 0;
     this.flyCameraTarget = null;
     this._colorTriggers = [];
+    this.letterZones = [];
     this._colorTriggerIdx = 0;
     this._touchColorTriggerActivated = new Set();
     this._touchSpawnTriggerActivated = new Set();
@@ -1759,6 +1762,8 @@ window.LevelObject = class LevelObject {
   _getTriggerTargetLabel(levelObj) {
     const raw = levelObj?._raw || {};
     const id = parseInt(levelObj?.id ?? 0, 10);
+    const letterLabel = LETTER_BLOCK_IDS[id];
+    if (letterLabel) return letterLabel;
     const colorChannelLabel = (channelId) => {
       const parsed = parseInt(channelId ?? 0, 10);
       const labels = {
@@ -1801,6 +1806,7 @@ window.LevelObject = class LevelObject {
 
     const worldX = levelObj.x * 2;
     const baseY = b(levelObj.y * 2);
+    const letterBlockId = LETTER_BLOCK_IDS[parseInt(levelObj.id ?? 0, 10)];
     const isStartPositionTrigger = [31, 34].includes(parseInt(levelObj.id ?? 0, 10));
     const triggerContainer = scene.add.container(worldX, 0);
     triggerContainer.setDepth(995);
@@ -1813,7 +1819,7 @@ window.LevelObject = class LevelObject {
     triggerContainer._eeEditorLayer = parseInt(levelObj.editorLayer ?? levelObj._raw?.[20] ?? levelObj._raw?.["20"] ?? 0, 10) || 0;
     triggerContainer._eeEditorLayer2 = parseInt(levelObj.editorLayer2 ?? levelObj._raw?.[61] ?? levelObj._raw?.["61"] ?? 0, 10) || 0;
 
-    const isTouchTrigger = objectDef?.type === triggerType && String(levelObj?._raw?.[11] ?? levelObj?._raw?.["11"] ?? "0") === "1";
+    const isTouchTrigger = objectDef?.type === triggerType && (String(levelObj?._raw?.[11] ?? levelObj?._raw?.["11"] ?? "0") === "1" || !!letterBlockId);
     const isSpawnTriggeredTrigger = objectDef?.type === triggerType && this._isTriggerSpawnTriggered(levelObj);
     let lineGfx = null;
     let hitboxGfx = null;
@@ -1843,15 +1849,17 @@ window.LevelObject = class LevelObject {
     }
 
     const labelText = this._getTriggerTargetLabel(levelObj);
-    const labelY = baseY + 10;
+    const labelY = letterBlockId ? baseY : baseY + 10;
+    const labelScale = letterBlockId ? 1 : 0.55;
+    const labelFontSize = letterBlockId ? 90 : 40;
     let label = null;
     if (labelText) {
       if (scene.cache?.bitmapFont?.has && scene.cache.bitmapFont.has("bigFont")) {
-        label = scene.add.bitmapText(0, labelY, "bigFont", labelText, 56).setOrigin(0.5).setScale(0.55);
+        label = scene.add.bitmapText(0, labelY, "bigFont", labelText, 56).setOrigin(0.5).setScale(labelScale);
       } else {
         label = scene.add.text(0, labelY, labelText, {
           fontFamily: "Pusab, Arial, sans-serif",
-          fontSize: "40px",
+          fontSize: labelFontSize + "px",
           color: "#ffffff",
           stroke: "#000000",
           strokeThickness: 6
@@ -1917,7 +1925,8 @@ window.LevelObject = class LevelObject {
     if (!this._editorTriggerVisuals) return;
     for (const visual of this._editorTriggerVisuals) {
       const saveObj = visual?.saveObj;
-      const isTouchTrigger = saveObj && String(saveObj?._raw?.[11] ?? saveObj?._raw?.["11"] ?? "0") === "1";
+      const isLetterBlock = !!(saveObj && LETTER_BLOCK_IDS[parseInt(saveObj?.id ?? 0, 10)]);
+      const isTouchTrigger = !!isLetterBlock || (saveObj && String(saveObj?._raw?.[11] ?? saveObj?._raw?.["11"] ?? "0") === "1");
       const isSpawnTriggeredTrigger = saveObj && this._isTriggerSpawnTriggered(saveObj);
       if (visual?.line?.setVisible) visual.line.setVisible(!isTouchTrigger && !isSpawnTriggeredTrigger);
       if (visual?.hitbox?.setVisible) visual.hitbox.setVisible(!!isTouchTrigger && !isSpawnTriggeredTrigger);
@@ -2258,6 +2267,18 @@ window.LevelObject = class LevelObject {
     if (objectDef.textObject) {
       this._spawnTextObject(levelObj, objectDef, linkedObjectId);
       return objectDef;
+    }
+
+    const _letterZoneLetter = LETTER_BLOCK_IDS[parseInt(levelObj.id ?? 0, 10)];
+    if (_letterZoneLetter) {
+      if (!this.letterZones) this.letterZones = [];
+      this.letterZones.push({
+        x: levelObj.x * 2,
+        y: levelObj.y * 2,
+        hw: ((objectDef.gridW || 1) * a) / 2,
+        hh: ((objectDef.gridH || 1) * a) / 2,
+        letter: _letterZoneLetter
+      });
     }
 
     this._spawnTriggerEditorVisual(levelObj, objectDef, linkedObjectId);
@@ -3133,6 +3154,7 @@ window.LevelObject = class LevelObject {
     const unknownObjectIds = new Set();
     this._lastObjectX = 0;
     this._nextObjectId = 0;
+    this.letterZones = [];
 
     for (const levelObj of _0x35f1ae) {
       const objectDef = this._spawnObject(levelObj);
@@ -3556,6 +3578,20 @@ window.LevelObject = class LevelObject {
         }
       }
     }
+  }
+  getLetterFlagsAt(cx, cy, halfW, halfH) {
+    const zones = this.letterZones;
+    if (!zones || !zones.length) return null;
+    let flags = null;
+    const margin = 2;
+    for (let i = 0; i < zones.length; i++) {
+      const z = zones[i];
+      if (Math.abs(cx - z.x) <= halfW + z.hw + margin && Math.abs(cy - z.y) <= halfH + z.hh + margin) {
+        if (!flags) flags = {};
+        flags[z.letter] = true;
+      }
+    }
+    return flags;
   }
   getNearbySectionObjects(_0x2e85c7) {
     const _0x55d1b7 = Math.max(0, Math.floor(_0x2e85c7 / 400));
