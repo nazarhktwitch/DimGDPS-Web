@@ -3950,6 +3950,55 @@ if (this.p.isFlying || this.p.isUfo) {
     return bestSurface;
   }
 
+  // Spider rings (444/3004) and the spider pad (3005). Mirrors the surface logic of
+  // the spider ability (_updateSpiderJump): move to the real opposite surface (fly
+  // ceiling or nearest solid), never to a fixed virtual height, so the landing can
+  // not end inside blocks/ceiling geometry.
+  _applySpiderSurfaceTeleport(goingUp, playerSize, playerWorldX) {
+    const oldY = this.p.y;
+    const surfaceY = this._findSpiderTeleportSurface(goingUp, playerWorldX, playerSize);
+
+    if (surfaceY === null || !Number.isFinite(surfaceY)) {
+      // Nothing to teleport to: same fallback as the spider ability (gravity flips, no move).
+      this.flipGravity(goingUp, 1.0);
+      this.p.yVelocity = 0;
+      this.p.onGround = false;
+      this.p.canJump = false;
+      this.p.isJumping = false;
+      return { teleported: false, died: false, y: oldY };
+    }
+
+    const landingY = goingUp ? surfaceY - playerSize : surfaceY + playerSize;
+    const blockingHazard = this._findSpiderTeleportHazard(goingUp, playerWorldX, playerSize, landingY);
+
+    if (blockingHazard && !window.noClip) {
+      const hazardCenterY = (blockingHazard.bounds.lower + blockingHazard.bounds.upper) / 2;
+      this.p.y = Number.isFinite(hazardCenterY) ? hazardCenterY : landingY;
+      this._spawnSpiderTeleportEffects(oldY, this.p.y);
+      this.p.yVelocity = 0;
+      this.p.onGround = false;
+      this.p.canJump = false;
+      this.p.isJumping = false;
+      this.killPlayer();
+      return { teleported: true, died: true, y: this.p.y };
+    }
+
+    this.p.y = landingY;
+    this.flipGravity(goingUp, 1.0);
+    if (blockingHazard && window.noClip) {
+      this.p._spiderTeleportNoclipDeathPending = true;
+      this.p.diedThisFrame = true;
+    }
+    this._spawnSpiderTeleportEffects(oldY, this.p.y);
+    this.p.yVelocity = 0;
+    // Stay "airborne" after the ring/pad teleport: the press that fired the object
+    // must not also jump off the surface we just landed on (same press, same tick).
+    this.p.onGround = false;
+    this.p.canJump = false;
+    this.p.isJumping = false;
+    return { teleported: true, died: false, y: this.p.y };
+  }
+
   _updateSpiderJump(dt) {
     if (!this.rotateActionActive) {
       this.updateGroundRotation(dt);
@@ -4546,19 +4595,16 @@ if (this.p.isFlying || this.p.isUfo) {
             let _padFlip = false;
             let _padNextTickVel = null;
             if (_padId === 3005) {
-              const _spFloor = this._gameLayer.getFloorY();
-              const _spCeil = this._gameLayer.getCeilingY() || f;
-              if (!this.p.gravityFlipped) {
-                this.p.y = _spCeil - playerSize;
-              } else {
-                this.p.y = _spFloor + playerSize;
+              const _spResult = this._applySpiderSurfaceTeleport(!this.p.gravityFlipped, playerSize, pieceWidth);
+              if (_spResult.died) {
+                return;
               }
-              this.flipGravity(!this.p.gravityFlipped, 1.0);
+              if (_spResult.teleported) {
+                playersY = _spResult.y;
+                playersLastY = _spResult.y;
+              }
               this._syncOtherDualGravityForBlueBoost();
               this.playGravityEffect(this.p.gravityFlipped);
-              this.p.yVelocity = 0;
-              this.p.onGround = false;
-              this.p.canJump = false;
               if (this.p.isBall) {
                 const gravityDir = this.p.gravityFlipped ? -1 : 1;
                 this.p.ballNormalRotate = this.p.mirrored ? -gravityDir : gravityDir;
@@ -4698,43 +4744,31 @@ if (this.p.isFlying || this.p.isUfo) {
                 _boostedThisStep = true;
               } else if (_orbId === 444) {
                 const _spPlayerSize = this.p.isMini ? 18 : 30;
-                const _spFloorY = this._gameLayer.getFloorY();
-                const _spCeilY  = this._gameLayer.getCeilingY() || f;
-                if (!this.p.gravityFlipped) {
-                  this.p.y = _spCeilY - _spPlayerSize;
-                  this.flipGravity(true, 1.0);
-                  this.playGravityEffect(true);
-                } else {
-                  this.p.y = _spFloorY + _spPlayerSize;
-                  this.flipGravity(false, 1.0);
-                  this.playGravityEffect(false);
+                const _spResult = this._applySpiderSurfaceTeleport(!this.p.gravityFlipped, _spPlayerSize, pieceWidth);
+                if (_spResult.died) {
+                  return;
                 }
+                if (_spResult.teleported) {
+                  playersY = _spResult.y;
+                  playersLastY = _spResult.y;
+                }
+                this.playGravityEffect(this.p.gravityFlipped);
                 this._syncOtherDualGravityForBlueBoost();
-                this.p.yVelocity = 0;
-                this.p.onGround = false;
-                this.p.canJump = false;
-                this.p.isJumping = false;
                 this.runRotateAction();
                 _boostedThisStep = true;
                 this._markActivatedOrbSprites(gameObj);
               } else if (_orbId === 3004) {
                 const _spPlayerSize = this.p.isMini ? 18 : 30;
-                const _spFloorY = this._gameLayer.getFloorY();
-                const _spCeilY  = this._gameLayer.getCeilingY() || f;
-                if (!this.p.gravityFlipped) {
-                  this.p.y = _spCeilY - _spPlayerSize;
-                  this.flipGravity(true, 1.0);
-                  this.playGravityEffect(true);
-                } else {
-                  this.p.y = _spFloorY + _spPlayerSize;
-                  this.flipGravity(false, 1.0);
-                  this.playGravityEffect(false);
+                const _spResult = this._applySpiderSurfaceTeleport(!this.p.gravityFlipped, _spPlayerSize, pieceWidth);
+                if (_spResult.died) {
+                  return;
                 }
+                if (_spResult.teleported) {
+                  playersY = _spResult.y;
+                  playersLastY = _spResult.y;
+                }
+                this.playGravityEffect(this.p.gravityFlipped);
                 this._syncOtherDualGravityForBlueBoost();
-                this.p.yVelocity = 0;
-                this.p.onGround = false;
-                this.p.canJump = false;
-                this.p.isJumping = false;
                 this.runRotateAction();
                 _boostedThisStep = true;
                 this._markActivatedOrbSprites(gameObj);
