@@ -5323,7 +5323,10 @@ if (this.p.isFlying || this.p.isUfo) {
         const leftSurfY = nearObject.getSlopeSurfaceY(leftWorld);
         const rightSurfY = nearObject.getSlopeSurfaceY(rightWorld);
         if (leftSurfY !== null && rightSurfY !== null) {
-          const solidBelow = nearObject.isSolidBelowSurface(this.p.gravityFlipped);
+          // Draw the collision shape from the collider's geometry only - it must not
+          // flip with the player's gravity, otherwise flipped runs show a mirrored
+          // phantom triangle (the real collision always uses slopeSolidBelow).
+          const solidBelow = !!nearObject.slopeSolidBelow;
           const leftIsBottom = Math.abs(leftSurfY - bboxBottom) < Math.abs(rightSurfY - bboxBottom);
           const thirdWorldX = solidBelow ? (leftIsBottom ? rightWorld : leftWorld) : (leftIsBottom ? leftWorld : rightWorld);
           const thirdWorldY = solidBelow ? bboxBottom : bboxTop;

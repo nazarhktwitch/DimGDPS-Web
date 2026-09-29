@@ -441,6 +441,8 @@ class LevelEditor {
         const section = this._level._sectionContainers[i];
         if (section?.additive) section.additive.visible = true;
         if (section?.normal) section.normal.visible = true;
+        if (section?.tAdditive) section.tAdditive.visible = true;
+        if (section?.t) section.t.visible = true;
     }
 
     this._level.resetVisibility?.();
@@ -2525,6 +2527,10 @@ class LevelEditor {
                     if (this._level.topContainer && !this._level.topContainer.exists(spr)) {
                         this._level.topContainer.add(spr);
                     }
+                } else if (Number(spr._eeZLayer ?? clone.zLayer) >= 5) {
+                    if (this._level.tContainer && !this._level.tContainer.exists(spr)) {
+                        this._level.tContainer.add(spr);
+                    }
                 } else if (this._level.container && !this._level.container.exists(spr)) {
                     this._level.container.add(spr);
                 }
@@ -2948,6 +2954,10 @@ class LevelEditor {
             if (spr._eeLayer === 2) {
                 if (this._level.topContainer && !this._level.topContainer.exists(spr)) {
                     this._level.topContainer.add(spr);
+                }
+            } else if (Number(spr._eeZLayer ?? saveData.zLayer) >= 5) {
+                if (this._level.tContainer && !this._level.tContainer.exists(spr)) {
+                    this._level.tContainer.add(spr);
                 }
             } else {
                 if (this._level.container && !this._level.container.exists(spr)) {

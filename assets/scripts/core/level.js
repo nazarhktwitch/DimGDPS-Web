@@ -619,6 +619,12 @@ const USER_COIN_ANIM_FRAMES = [
 function getObjectFromId(id) {
   return allObjects[id] || null;
 }
+// GD z layers (key 24): B = {-5, -3, -1, 1, 3} render below the player icon,
+// T = {5, 7, 9, 11} render above it (GD: "B5..B1 -> P (Player) -> T1..T4").
+// See level-editor.js _getEditorZLayerOptions.
+function isTLayer(zLayer) {
+  return Number(zLayer) >= 5;
+}
 
 window.LevelObject = class LevelObject {
   constructor(scene, cameraXRef) {
@@ -626,6 +632,21 @@ window.LevelObject = class LevelObject {
     this._cameraXRef = cameraXRef;
     this.additiveContainer = scene.add.container(0, 0).setDepth(-1);
     this.container = scene.add.container(0, 0);
+    // T z-layer sprites (key 24 >= 5) must render above the player icon like in
+    // GD, but section containers live inside `container` (scene depth 0), whose
+    // children can never sort above the scene-level player (~depth 8-10).
+    // tContainer sits between them (depth 11) and is glued to `container`'s
+    // transform/visibility so every existing camera pan, editor zoom/pan,
+    // mirror flip and menu hide applies to T sprites automatically.
+    this.tContainer = scene.add.container(0, 0).setDepth(11);
+    const _tGlueSrc = this.container;
+    for (const _tProp of ["x", "y", "scaleX", "scaleY", "rotation", "alpha", "visible"]) {
+      Object.defineProperty(this.tContainer, _tProp, {
+        configurable: true,
+        get: () => _tGlueSrc[_tProp],
+        set: (_tValue) => { _tGlueSrc[_tProp] = _tValue; }
+      });
+    }
     this.topContainer = scene.add.container(0, 0).setDepth(13);
     this.objects = [];
     this.endXPos = 0;
@@ -1653,8 +1674,9 @@ window.LevelObject = class LevelObject {
       }
     }
   }
-  _addVisualSprite(sprite, objectData = null) {
+  _addVisualSprite(sprite, objectData = null, zLayer = null) {
     if (sprite) {
+      if (zLayer !== null && zLayer !== undefined) sprite._eeZLayer = zLayer;
       if (objectData && objectData.blend === "additive") {
         sprite.setBlendMode(S);
         sprite._eeLayer = 0;
@@ -1702,7 +1724,7 @@ window.LevelObject = class LevelObject {
           glow.setVisible(glowVisible);
       }
   };
-  _addGlowSprite(scene, x, y, frameName, objectData, worldX, colorData = null, objectDef = null) {
+  _addGlowSprite(scene, x, y, frameName, objectData, worldX, colorData = null, objectDef = null, zLayer = null) {
     let glowFrameName = this._getGlowFrameName(frameName, objectData, objectDef);
     if (!glowFrameName || glowFrameName === frameName) {
       return;
@@ -1731,6 +1753,7 @@ window.LevelObject = class LevelObject {
       glowSprite.setAlpha(this._getGlowAlphaMultiplier());
       glowSprite._eeOrigAlpha = glowSprite.alpha;
       glowSprite._eeLayer = 0;
+      glowSprite._eeZLayer = zLayer;
       if (!this._glowSprites) {
         this._glowSprites = [];
       }
@@ -1986,6 +2009,7 @@ window.LevelObject = class LevelObject {
     const zDepth = (depthBase[zLayer] ?? 0) + zOrder * 0.001;
     textSprite.setDepth(zDepth);
     textSprite._eeLayer = 1;
+    textSprite._eeZLayer = zLayer;
     textSprite._eeWorldX = worldX;
     textSprite._eeBaseY = worldY;
     textSprite._eeOrigWorldX = worldX;
@@ -2081,6 +2105,7 @@ window.LevelObject = class LevelObject {
       if (portalBackSprite) {
         this._applyVisualProps(scene, portalBackSprite, backFrame, exitLevelObj, exitDefSource);
         portalBackSprite._eeLayer = 1;
+        portalBackSprite._eeZLayer = exitLevelObj.zLayer;
         portalBackSprite._eeWorldX = worldX;
         portalBackSprite._eeBaseY = baseY;
         portalBackSprite._eeZDepth = objZDepth - 0.004;
@@ -2101,7 +2126,7 @@ window.LevelObject = class LevelObject {
       portalBackSprite.x = sprite.x;
       portalBackSprite.y = sprite.y;
     }
-    this._addVisualSprite(sprite, exitDef);
+    this._addVisualSprite(sprite, exitDef, exitLevelObj.zLayer);
     sprite._eeWorldX = worldX;
     sprite._eeBaseY = baseY;
     sprite._eeZDepth = objZDepth + 0.004;
@@ -2426,6 +2451,7 @@ window.LevelObject = class LevelObject {
       if (portalBackSprite) {
         this._applyVisualProps(scene, portalBackSprite, backFrame, levelObj);
         portalBackSprite._eeLayer = 1;
+        portalBackSprite._eeZLayer = zLayer;
         portalBackSprite._eeWorldX = worldX;
         portalBackSprite._eeBaseY = baseY;
         portalBackSprite._eeZDepth = objZDepth - 0.005;
@@ -2439,7 +2465,7 @@ window.LevelObject = class LevelObject {
 
     let orbGlow = null;
     if (this._hasGlow(objectDef, levelObj)) {
-      orbGlow = this._addGlowSprite(scene, spriteWorldX, baseY, frameName, levelObj, worldX, null, objectDef);
+      orbGlow = this._addGlowSprite(scene, spriteWorldX, baseY, frameName, levelObj, worldX, null, objectDef, zLayer);
       if (orbGlow) {
         orbGlow._eeZDepth = objZDepth - 0.003;
         orbGlow._eeOrigAlpha = orbGlow.alpha ?? 1;
@@ -2458,7 +2484,7 @@ window.LevelObject = class LevelObject {
         portalBackSprite.x = sprite.x;
         portalBackSprite.y = sprite.y;
       }
-      this._addVisualSprite(sprite, visualDef);
+      this._addVisualSprite(sprite, visualDef, zLayer);
       sprite._eeWorldX = worldX;
       sprite._eeBaseY = baseY;
       sprite._eeZDepth = objZDepth;
@@ -2587,6 +2613,7 @@ window.LevelObject = class LevelObject {
           registerColor(sawMirror, col1, true);
           sawMirror._eeWorldX = worldX;
           sawMirror._eeBaseY = baseY;
+          sawMirror._eeZLayer = zLayer;
           this._addToSection(sawMirror);
           this._addVisualSprite(sawMirror);
           issawsprite(sawMirror);
@@ -2602,7 +2629,7 @@ window.LevelObject = class LevelObject {
 
       if (overlaySprite) {
         this._applyVisualProps(scene, overlaySprite, overlayFrame, levelObj);
-        this._addVisualSprite(overlaySprite);
+        this._addVisualSprite(overlaySprite, null, zLayer);
         overlaySprite._eeWorldX = worldX;
         overlaySprite._eeBaseY = baseY;
         overlaySprite._eeZDepth = objZDepth + 0.002;
@@ -2661,9 +2688,14 @@ window.LevelObject = class LevelObject {
             childrotated = 0;
           } 
           else if (childDef.frame === "blockOutline_14new_001.png" || childDef.frame === "blockOutline_15new_001.png") {
+            // These "new" outline strips are packed as horizontal lines whose length
+            // equals the slope hypotenuse (1:1 -> 85px, 2:1 -> 137px), so they must end
+            // up parallel to the hypotenuse: offset = hypAngle - parentRot. Measured on
+            // level 254 (780 instances): hyp = rot + 45 (1:1) / rot + 26.565 (2:1),
+            // flipped once via the mirroring below, so the base offset is POSITIVE.
             let childRotOffset = 0;
-            if (childDef.frame === "blockOutline_14new_001.png") childRotOffset = -45;
-            else if (childDef.frame === "blockOutline_15new_001.png") childRotOffset = -26.565;
+            if (childDef.frame === "blockOutline_14new_001.png") childRotOffset = 45;
+            else if (childDef.frame === "blockOutline_15new_001.png") childRotOffset = 26.565;
             if (flipX) childRotOffset = -childRotOffset;
             if (flipY) childRotOffset = -childRotOffset;
             childrotated += childRotOffset;
@@ -2699,9 +2731,10 @@ window.LevelObject = class LevelObject {
           }
           if ((childDef.z !== undefined ? childDef.z : -1) < 0) {
             childSprite._eeLayer = 1;
+            childSprite._eeZLayer = zLayer;
             childSprite._eeBehindParent = true;
           } else {
-            this._addVisualSprite(childSprite, bortalstuff);
+            this._addVisualSprite(childSprite, bortalstuff, zLayer);
           }
 
           childSprite._eeWorldX = childWorldX;
@@ -2727,7 +2760,7 @@ window.LevelObject = class LevelObject {
 
           const childGlowEnabled = this._hasGlow(childDef, childObjectData) || this._hasGlow(objectDef, levelObj);
           if (childGlowEnabled) {
-            const childGlowSprite = this._addGlowSprite(scene, spriteWorldX + childDx, baseY + childDy, childDef.frame, childObjectData, childWorldX, null, childVisualDef);
+            const childGlowSprite = this._addGlowSprite(scene, spriteWorldX + childDx, baseY + childDy, childDef.frame, childObjectData, childWorldX, null, childVisualDef, zLayer);
             if (childGlowSprite) {
               childGlowSprite.rotation = childSprite.rotation;
               childGlowSprite.x = childSprite.x;
@@ -2789,6 +2822,7 @@ window.LevelObject = class LevelObject {
               childMirror._isSaw = true;
               childMirror._eeZDepth = childSprite._eeZDepth;
               childMirror._eeLayer = childSprite._eeLayer ?? 1;
+              childMirror._eeZLayer = childSprite._eeZLayer;
               childMirror._eeBehindParent = true;
               if (childSprite._Sawrotationspeed !== undefined) {
                 childMirror._Sawrotationspeed = childSprite._Sawrotationspeed;
@@ -3210,6 +3244,8 @@ window.LevelObject = class LevelObject {
       if (sc) {
         if (sc.normal && sc.normal.list && sc.normal.list.length > 1) sc.normal.sort("depth");
         if (sc.additive && sc.additive.list && sc.additive.list.length > 1) sc.additive.sort("depth");
+        if (sc.t && sc.t.list && sc.t.list.length > 1) sc.t.sort("depth");
+        if (sc.tAdditive && sc.tAdditive.list && sc.tAdditive.list.length > 1) sc.tAdditive.sort("depth");
       }
     }
 
@@ -3395,13 +3431,22 @@ window.LevelObject = class LevelObject {
     if (!this._sectionContainers[sectionIndex]) {
       const sectionContainer = {
         additive: this._scene.add.container(0, 0),
-        normal: this._scene.add.container(0, 0)
+        normal: this._scene.add.container(0, 0),
+        // Per-section containers for T z-layer sprites: they live inside
+        // tContainer (scene depth 11, above the player) so T stays above the
+        // icon while section visibility culling keeps working.
+        tAdditive: this._scene.add.container(0, 0).setDepth(-1),
+        t: this._scene.add.container(0, 0).setDepth(0)
       };
       const sectionVisible = this._visMinSec === undefined || this._visMinSec < 0 || (sectionIndex >= this._visMinSec && sectionIndex <= this._visMaxSec);
       sectionContainer.additive.visible = sectionVisible;
       sectionContainer.normal.visible = sectionVisible;
+      sectionContainer.tAdditive.visible = sectionVisible;
+      sectionContainer.t.visible = sectionVisible;
       this.additiveContainer.add(sectionContainer.additive);
       this.container.add(sectionContainer.normal);
+      this.tContainer.add(sectionContainer.tAdditive);
+      this.tContainer.add(sectionContainer.t);
       this._sectionContainers[sectionIndex] = sectionContainer;
     }
     return this._sectionContainers[sectionIndex];
@@ -3420,12 +3465,13 @@ window.LevelObject = class LevelObject {
       return;
     }
     const _0x2157d3 = this._ensureSectionContainer(_0x4ac40a);
+    const _0x14d5f7T = isTLayer(sliderWidth._eeZLayer);
     if (_0x14d5f7 === 0) {
-      _0x2157d3.additive.add(sliderWidth);
+      (_0x14d5f7T ? _0x2157d3.tAdditive : _0x2157d3.additive).add(sliderWidth);
     } else if (sliderWidth._eeBehindParent) {
-      _0x2157d3.normal.addAt(sliderWidth, 0);
+      (_0x14d5f7T ? _0x2157d3.t : _0x2157d3.normal).addAt(sliderWidth, 0);
     } else {
-      _0x2157d3.normal.add(sliderWidth);
+      (_0x14d5f7T ? _0x2157d3.t : _0x2157d3.normal).add(sliderWidth);
     }
   }
   _refreshSpriteSection(sprite) {
@@ -3461,7 +3507,10 @@ window.LevelObject = class LevelObject {
     }
 
     const sectionContainer = this._ensureSectionContainer(nextSection);
-    const targetContainer = layer === 0 ? sectionContainer.additive : sectionContainer.normal;
+    const isT = isTLayer(sprite._eeZLayer);
+    const targetContainer = layer === 0
+      ? (isT ? sectionContainer.tAdditive : sectionContainer.additive)
+      : (isT ? sectionContainer.t : sectionContainer.normal);
     if (sprite.parentContainer === targetContainer) return;
     if (layer !== 0 && sprite._eeBehindParent) targetContainer.addAt(sprite, 0);
     else targetContainer.add(sprite);
@@ -3503,6 +3552,8 @@ window.LevelObject = class LevelObject {
     if (_0x141e9c) {
       _0x141e9c.additive.visible = _0x488507;
       _0x141e9c.normal.visible = _0x488507;
+      if (_0x141e9c.tAdditive) _0x141e9c.tAdditive.visible = _0x488507;
+      if (_0x141e9c.t) _0x141e9c.t.visible = _0x488507;
     }
   }
   updateVisibility(_0xa5f1e1) {
