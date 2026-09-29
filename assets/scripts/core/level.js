@@ -149,6 +149,9 @@ function parseLevel(levelString) {
     decompressedString = function (compressedString) {
       let getBase64 = function (compressedString) {
         let lessCluttered = compressedString.replace(/-/g, "+").replace(/_/g, "/");
+        // Strip stray bytes (NULs, line wraps, BOMs): one garbage byte makes
+        // atob throw and the whole level silently loads with zero objects.
+        lessCluttered = lessCluttered.replace(/[^A-Za-z0-9+/=]/g, "");
         while (lessCluttered.length % 4 != 0) {
           lessCluttered += "=";
         }
