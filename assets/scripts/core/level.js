@@ -127,8 +127,10 @@ function parseObject(objectString) {
       zOrder: parseInt(objectData[25] || "0", 10),
       editorLayer2: parseInt(objectData[61] || "0", 10),
       groups: groupString,
-      color1: parseInt(objectData[21] || "0", 10),
-      color2: parseInt(objectData[22] || "0", 10),
+      // key 19 = "1.9 Color Channel ID": when set to a valid value it overrides
+      // both key 21 (main) and key 22 (secondary) color channel ids.
+      color1: parseInt(objectData[19] || "") > 0 ? parseInt(objectData[19], 10) : parseInt(objectData[21] || "0", 10),
+      color2: parseInt(objectData[19] || "") > 0 ? 0 : parseInt(objectData[22] || "0", 10),
       text: _decodeTextObjectString(objectData[31] ?? objectData["31"] ?? ""),
       gameMode: parseInt(objectData['kA2'] ?? '0', 10),
       miniMode: parseInt(objectData['kA3'] ?? '0', 10),
@@ -1183,13 +1185,17 @@ window.LevelObject = class LevelObject {
         b: parseInt(cp[3] || "255", 10)
       };
     };
-    if (!this._initialColors[1000] && settingsMap["kS29"]) {
-      let col = parseColorEntry(settingsMap["kS29"]);
-      if (col) this._initialColors[1000] = col;
-    }
-    if (!this._initialColors[1001] && settingsMap["kS30"]) {
-      let col = parseColorEntry(settingsMap["kS30"]);
-      if (col) this._initialColors[1001] = col;
+    // Pre-2.0 levels stored every colour channel in its own key (deprecated once
+    // kS38 was introduced). Mapping per GD docs:
+    //   kS29->1000 BG, kS30->1001 Ground, kS31->1002 Line, kS32->1004 Object,
+    //   kS33->1 Col1, kS34->2 Col2, kS35->3 Col3, kS36->4 Col4, kS37->1003 3DL
+    const legacyColorKeys = { kS29: 1000, kS30: 1001, kS31: 1002, kS32: 1004, kS33: 1, kS34: 2, kS35: 3, kS36: 4, kS37: 1003 };
+    for (const legacyKey in legacyColorKeys) {
+      const legacyChannel = legacyColorKeys[legacyKey];
+      if (!this._initialColors[legacyChannel] && settingsMap[legacyKey]) {
+        let col = parseColorEntry(settingsMap[legacyKey]);
+        if (col) this._initialColors[legacyChannel] = col;
+      }
     }
   }
   _buildGround() {
@@ -1635,8 +1641,12 @@ window.LevelObject = class LevelObject {
       if (blackDefault) {
         sprite.setTint(0);
         sprite._isBlack = true;
-        sprite._canColor = colorData.can_color === true;
-        sprite._blackDefault = sprite._canColor && !(Number(objectData?.color1) > 0);
+        // An explicit colour channel assigned by the level (key 19 / 21 / 22) always
+        // wins over the def's can_color flag - otherwise those objects keep the raw
+        // (white/black) texture instead of the level's colour.
+        const levelAssignedColor = Number(objectData?.color1) > 0 || Number(objectData?.color2) > 0;
+        sprite._canColor = colorData.can_color === true || levelAssignedColor;
+        sprite._blackDefault = colorData.can_color === true && !levelAssignedColor;
       }
     }
   }
@@ -1710,8 +1720,9 @@ window.LevelObject = class LevelObject {
       if (blackDefault) {
         glowSprite.setTint(0);
         glowSprite._isBlack = true;
-        glowSprite._canColor = colorData.can_color === true;
-        glowSprite._blackDefault = glowSprite._canColor && !(Number(objectData?.color1) > 0);
+        const levelAssignedColor = Number(objectData?.color1) > 0 || Number(objectData?.color2) > 0;
+        glowSprite._canColor = colorData.can_color === true || levelAssignedColor;
+        glowSprite._blackDefault = colorData.can_color === true && !levelAssignedColor;
       }
       glowSprite.setBlendMode(Phaser.BlendModes.ADD);
       glowSprite.setAlpha(this._getGlowAlphaMultiplier());
@@ -1984,7 +1995,7 @@ window.LevelObject = class LevelObject {
     textSprite._eeEditorLayer2 = parseInt(levelObj.editorLayer2 ?? levelObj._raw?.[61] ?? levelObj._raw?.["61"] ?? 0, 10) || 0;
 
     const colorChannel = parseInt(levelObj.color1 || objectDef?.default_base_color_channel || 0, 10) || 0;
-    if (colorChannel > 0 && objectDef?.can_color !== false) {
+    if (colorChannel > 0 && (objectDef?.can_color !== false || Number(levelObj.color1) > 0)) {
       textSprite._eeColorChannel = colorChannel;
       if (!this._colorChannelSprites[colorChannel]) this._colorChannelSprites[colorChannel] = [];
       this._colorChannelSprites[colorChannel].push(textSprite);
@@ -2365,10 +2376,15 @@ window.LevelObject = class LevelObject {
     if (col1 === 0 && (objectDef.type === solidType || objectDef.type === hazardType)) col1 = 1;
 
     const col2 = levelObj.color2 || (objectDef.default_detail_color_channel !== undefined ? objectDef.default_detail_color_channel : -1);
-    const canColor = objectDef.can_color !== false;
+    // The level explicitly assigning a colour channel (key 19 / 21 / 22) must always be
+    // tinted, even for defs flagged can_color:false (blocks/spikes/saws would otherwise
+    // render with their raw white/black texture instead of the level's colour).
+    const levelAssignsColor = Number(levelObj.color1) > 0 || Number(levelObj.color2) > 0;
+    const canColor = objectDef.can_color !== false || levelAssignsColor;
 
     const registerColor = (spr, ch, forceParentColor = false) => {
-      if (!spr || spr._cantColor || (spr._isBlack && !spr._canColor)) return;
+      if (!spr || spr._cantColor) return;
+      if (spr._isBlack && !spr._canColor && !canColor) return;
       if (ch > 0 && (canColor || spr._canColor) && spr) {
         spr._eeColorChannel = ch;
         if (!this._colorChannelSprites[ch]) this._colorChannelSprites[ch] = [];
@@ -4317,12 +4333,15 @@ window.LevelObject = class LevelObject {
         if (spr._cantColor) continue;
         if (spr._eePulsed) continue;
         if (spr._eeAudioScale) continue;
-        if (spr._isSaw && spr._SawColor !== undefined) {
-          const sawHex = colorManager.getHex(spr._SawColor);
-          spr.setTint(sawHex);
+        if (spr._isSaw) {
+          // Saws and saw-glow sprites registered without forceParentColor never got a
+          // dedicated _SawColor; without this fallback they kept the raw white/black
+          // creation tint (the "black default saws" bug). Fall back to the channel the
+          // sprite was registered on, exactly like a normal sprite would use.
+          const sawHex = spr._SawColor !== undefined ? colorManager.getHex(spr._SawColor) : hex;
+          if (typeof spr.setTint === "function") spr.setTint(sawHex);
           continue;
         }
-        if (spr._isSaw) continue;
         if (spr._isBlack && !spr._canColor) continue;
         if (spr._blackDefault && typeof colorManager.hasColor === "function" && !colorManager.hasColor(chId)) continue;
         if (typeof spr.setTint === "function") spr.setTint(hex);
