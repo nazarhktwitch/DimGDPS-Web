@@ -8259,6 +8259,12 @@ _showwippopup() {
       return;
     }
     if (this._state.isDead) {
+      // Dual: the physics substep below never runs once the primary is dead, so
+      // the secondary would survive the whole death sequence — its icon froze on
+      // screen while updateExplosionPieces further down expected it to explode.
+      if (this._isDual && !this._state2.isDead) {
+        this._player2.killPlayer();
+      }
       if (!this._deathSoundPlayed) {
         if (!this._audio._shouldUsePracticeSong()) {
           this._audio.stopMusic();
@@ -8478,6 +8484,16 @@ _showwippopup() {
           this._player2.killPlayer();
         }
         if (this._isDual) this._ensureDualFlyBounds();
+      }
+      // Dual invariant: the two players always die together. The syncs above sit
+      // behind the "!_state2.isDead" gate, so a secondary death arriving outside
+      // its own update (deferred kill, portal/state reset) used to leave the
+      // primary running forever — and a primary death happening between frames
+      // used to leave the secondary alive during the death sequence.
+      if (this._isDual && this._state.isDead && !this._state2.isDead) {
+        this._player2.killPlayer();
+      } else if (this._isDual && this._state2.isDead && !this._state.isDead) {
+        this._player.killPlayer();
       }
       if (!this._state.isFlying && !this._state.isWave && !this._state.isUfo) {
         if (this._state.isBall) {
