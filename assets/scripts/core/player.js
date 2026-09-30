@@ -2001,6 +2001,9 @@ if (this.p.isFlying || this.p.isUfo) {
     this.exitRobotMode();
     this.exitBallMode();
     this.exitWaveMode();
+    // Checkpoint/restore/editor entry points call enterShipMode directly, so
+    // the UFO state has to be unwound here (the portal path already did it).
+    this.exitUfoMode();
     this.p.isFlying = true;
     this._scene.toggleGlitter(true);
     if (!fromCheckpoint){ // dont mess with y velocity if ur loading a checkpoint
@@ -2067,6 +2070,7 @@ if (this.p.isFlying || this.p.isUfo) {
     this.exitSpiderMode();
     this.exitRobotMode();
     this.exitWaveMode();
+    this.exitUfoMode();
     this.p.isBall = true;
     this.p.ballShouldRotate = false;
     this.p.ballRotateOpposite = false;
@@ -2115,6 +2119,7 @@ if (this.p.isFlying || this.p.isUfo) {
     this.exitRobotMode();
     this.exitShipMode();
     this.exitBallMode();
+    this.exitUfoMode();
     this.p.isWave = true;
     this.p.yVelocity = 0;
     this.p.onGround = false;
@@ -2167,6 +2172,7 @@ if (this.p.isFlying || this.p.isUfo) {
     this.exitRobotMode();
     this.exitBallMode();
     this.exitWaveMode();
+    this.exitUfoMode();
     const savedPortalYVelocity = Number.isFinite(portalYVelocity) ? portalYVelocity : null;
     this.p.isSpider = true;
     if (!enteredFromPortal) this.p.yVelocity = 0;
