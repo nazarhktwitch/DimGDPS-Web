@@ -5361,7 +5361,11 @@ _buildSettingsPopup() {
 
         createNumberInput(container, column2X, startY, "Speedhack", 
           () => window.speedHack, 
-          (v) => window.speedHack = v,
+          (v) => {
+            window.speedHack = v;
+            // Keep the level music rate in step with the gameplay speed.
+            this._audio?.applySpeedHackRate?.();
+          },
           0.1,
           10,
           false
@@ -5627,6 +5631,9 @@ _buildSettingsPopup() {
     window.hitboxesOnDeath = data.hitboxesOnDeath;
     window.showCPS = data.showCPS;
     window.speedHack = data.speedHack;
+    // Settings may be (re)loaded while level music plays; keep its rate in
+    // step (no-op for menu music, which stays at 1x).
+    this._audio?.applySpeedHackRate?.();
     window.macroBot = data.macroBot;
     window.practiceMusicSync = !!data.practiceMusicSync;
     window.showGlow = data.showGlow;

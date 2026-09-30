@@ -76,6 +76,7 @@ class AudioManager {
     this._pendingOnlineSongLoadKey = null;
     this._pendingOnlineSongLoadOffset = 0;
     this._pendingOnlineSongFadeDuration = null;
+    this._musicRate = 1;
   }
   _effectiveVolume() {
     return this._userMusicVol * 0.8;
@@ -271,6 +272,7 @@ class AudioManager {
         if (savedKey === practiceSongKey && savedPosition > 0) {
           this._music.seek = savedPosition;
         }
+        this.applySpeedHackRate();
         this._setupAnalyser();
         this._musicPlaying = true;
         return;
@@ -303,6 +305,7 @@ class AudioManager {
     this._music.play();
     const startOffset = this._getLevelSongStartOffset();
     this._music.seek = startOffset + StartPosOffset;
+    this.applySpeedHackRate();
     this._setupAnalyser();
     this._musicPlaying = true;
   }
@@ -369,6 +372,7 @@ class AudioManager {
         _startedAt  = ctx.currentTime;
         _isPlaying  = true;
         _isPaused   = false;
+        try { newSrc.playbackRate.value = self._musicRate || 1; } catch (e) {}
       },
       setLoop: () => {},
       get volume() { return gainNode.gain.value; },
@@ -376,6 +380,9 @@ class AudioManager {
     };
 
     this._music = musicObj;
+    // Rate comes from window.speedHack via _musicRate; the fresh source above
+    // starts at 1x until this lands.
+    this.applySpeedHackRate();
   }
   startMenuMusic() {
     if (this._music) {
@@ -395,6 +402,25 @@ class AudioManager {
       this._music.stop();
     }
     this._musicPlaying = false;
+  }
+  // Gameplay runs at window.speedHack x real time (_quantizeDelta multiplies
+  // deltaTime by it), so level music has to play at the same rate or the two
+  // drift apart. Menu music keeps 1x - the speedhack only scales gameplay.
+  applySpeedHackRate() {
+    const raw = Number(window.speedHack);
+    const rate = Number.isFinite(raw) && raw > 0.05 ? raw : 1;
+    this._musicRate = rate;
+    const m = this._music;
+    if (m && m.key !== "menu_music") {
+      if (typeof m.setRate === "function") {
+        m.setRate(rate);
+      } else {
+        try { m.rate = rate; } catch (e) { /* music wrapper without rate */ }
+      }
+    }
+    if (this._onlineSource) {
+      try { this._onlineSource.playbackRate.value = rate; } catch (e) {}
+    }
   }
   isplaying() {
     return this._music != null && this._music.isPlaying != false;
@@ -438,6 +464,7 @@ class AudioManager {
           volume: 0
         });
         this._music.play();
+        this.applySpeedHackRate();
         this._setupAnalyser();
         this._musicPlaying = true;
         return;
@@ -475,6 +502,7 @@ class AudioManager {
       volume: 0
     });
     this._music.play();
+    this.applySpeedHackRate();
     this._setupAnalyser();
     this._scene.tweens.add({
       targets: this._music,
