@@ -702,6 +702,17 @@ window.LevelObject = class LevelObject {
     this._spawnTriggers = [];
     this._spawnTriggerIdx = 0;
     this._activeSpawnDelays = [];
+    // Camera trigger family: 1913 Zoom / 1914 Static / 1916 Offset / 2015 Rotate.
+    this._cameraTriggers = [];
+    this._cameraTriggerIdx = 0;
+    this._cameraTriggersSorted = false;
+    this._touchCameraTriggerActivated = new Set();
+    this._activeCameraTweens = [];
+    this._camFx = { zoom: 1, rot: 0, offX: 0, offY: 0, locks: { X: null, Y: null } };
+    // Camera Guide (2016) markers: trigger-type objects never spawn a sprite,
+    // so their group positions are recorded here as static-lock targets.
+    // They are static world data and are intentionally not cleared on reset.
+    this._cameraGuides = {};
     this._colorChannelSprites = {};
     this._ground2Tint = 0xffffff;
     this._groupSprites = {};
@@ -1418,10 +1429,20 @@ window.LevelObject = class LevelObject {
     }
     const ground2TexKey = "groundSquare_" + (window._groundId || "00") + "_2_001.png";
     const hasGround2 = this._scene.textures.exists(ground2TexKey);
+    // Camera zoom < 1 pulls the visible world edges outward (zoom is about the
+    // screen centre), and rotation corners reach further too - a tile may only
+    // be recycled once it is left of the true visible edge, not cameraX.
+    const _fx = this._camFx;
+    let _leftEdgeMargin = 0;
+    if (_fx) {
+      const _z = _fx.zoom > 0 ? _fx.zoom : 1;
+      if (_z < 1) _leftEdgeMargin = (screenWidth / 2) * (1 / _z - 1);
+      _leftEdgeMargin += (screenHeight / 2) * Math.abs(Math.sin(_fx.rot || 0));
+    }
     for (let i = 0; i < this._groundTiles.length; i++) {
       let groundTile = this._groundTiles[i];
       let ceilingTile = this._ceilingTiles[i];
-      if (groundTile._worldX + tileWidth <= cameraX) {
+      if (groundTile._worldX + tileWidth <= cameraX - _leftEdgeMargin) {
         groundTile._worldX = maxWorldX + tileWidth;
         ceilingTile._worldX = groundTile._worldX;
         maxWorldX = groundTile._worldX;
@@ -2288,6 +2309,64 @@ window.LevelObject = class LevelObject {
         delay: Math.max(0, parseFloat(_raw[63] ?? 0) || 0),
         randomDelay: Math.max(0, parseFloat(_raw[556] ?? _raw["556"] ?? 0) || 0)
       });
+    }
+
+    // Camera Guide (2016): an invisible marker whose group the static/zoom
+    // triggers lock onto. Guides are trigger-type objects and never spawn a
+    // sprite, so their positions are recorded directly as the lock target
+    // (every static target group in real levels is exactly one 2016).
+    if (levelObj.id === 2016) {
+      const guideGids = String(levelObj.groups || "")
+        .split(".")
+        .map((n) => parseInt(n, 10))
+        .filter((n) => n > 0);
+      for (const gid of guideGids) {
+        if (!this._cameraGuides[gid]) this._cameraGuides[gid] = [];
+        this._cameraGuides[gid].push({ x: levelObj.x * 2, y: levelObj.y * 2 });
+      }
+    }
+
+    // Camera trigger family: 1913 Zoom, 1914 Static, 1916 Camera Offset,
+    // 2015 Camera Rotate. 2925 (camera mode) never appears in real levels and
+    // has no gameplay effect to simulate, so it is intentionally not collected.
+    if ([1913, 1914, 1916, 2015].includes(levelObj.id)) {
+      const _raw = levelObj._raw;
+      const _num = (key, dflt) => {
+        const v = parseFloat(_raw?.[key] ?? _raw?.[String(key)] ?? "");
+        return Number.isFinite(v) ? v : dflt;
+      };
+      const _int = (key, dflt) => {
+        const v = parseInt(_raw?.[key] ?? _raw?.[String(key)] ?? "", 10);
+        return Number.isFinite(v) ? v : dflt;
+      };
+      const _flag = (key) => String(_raw?.[key] ?? _raw?.[String(key)] ?? "0") === "1";
+      const cameraTrig = {
+        ...triggerBase,
+        kind: levelObj.id,
+        x: levelObj.x * 2,
+        y: levelObj.y * 2,
+        touchTriggered: _flag(11),
+        duration: _num(10, 0.5),
+        easingType: _int(30, 0),
+        easingRate: _num(85, 2)
+      };
+      if (levelObj.id === 1913) {
+        cameraTrig.zoom = _num(371, 1);            // target zoom (1 = default view)
+      } else if (levelObj.id === 1916) {
+        cameraTrig.offsetX = _num(28, 0) * 2;      // level units -> world px (like Move)
+        cameraTrig.offsetY = _num(29, 0) * 2;
+        cameraTrig.axis = _int(101, 0);            // 1 = X only, 2 = Y only
+      } else if (levelObj.id === 1914) {
+        cameraTrig.targetGroup = _int(71, 0);      // object group the camera locks onto
+        cameraTrig.exitStatic = _flag(110);        // releases the lock instead of taking it
+        cameraTrig.exitInstant = _flag(212);       // release with no tween (duration = -1)
+        cameraTrig.follow = _flag(453);            // live-track the group while locked
+        cameraTrig.axis = _int(101, 0);            // 1 = X only, 2 = Y only
+      } else if (levelObj.id === 2015) {
+        cameraTrig.degrees = _num(68, 0);
+        cameraTrig.add = _flag(394);               // add to the current angle instead of setting it
+      }
+      this._cameraTriggers.push(cameraTrig);
     }
 
     if ([31, 34].includes(levelObj.id)) {
@@ -3592,15 +3671,34 @@ window.LevelObject = class LevelObject {
     if (!Number.isFinite(cd)) cd = 3;
     cd = Math.max(0, Math.min(3, Math.floor(cd)));
 
+    // Camera zoom/rotate widens the slice of the world that is actually on
+    // screen, so widen the culling window by the same amount or edge sections
+    // pop out while still visible.
+    let _visL = _0xa5f1e1;
+    let _visR = _0xa5f1e1 + screenWidth;
+    const _camFx = this._camFx;
+    if (_camFx && (_camFx.zoom < 0.999 || Math.abs(_camFx.rot || 0) > 0.001)) {
+      const _z = _camFx.zoom > 0 ? _camFx.zoom : 1;
+      const _sin = Math.abs(Math.sin(_camFx.rot || 0));
+      const _cos = Math.abs(Math.cos(_camFx.rot || 0));
+      let _grow = Math.max(0, (screenWidth / 2) * (1 / _z - 1));
+      _grow += Math.max(0, (screenWidth * _cos + screenHeight * _sin - screenWidth) / 2);
+      _grow += Math.max(0, (screenHeight * _cos + screenWidth * _sin - screenHeight) / 2);
+      if (_grow > 0) {
+        _visL -= _grow;
+        _visR += _grow;
+      }
+    }
+
     let particleScale, sliderHeight;
     if (cd === 3) {
-      particleScale = Math.max(0, Math.floor((_0xa5f1e1 - 200) / 400));
-      sliderHeight = Math.min(_0x1dce22, Math.floor((_0xa5f1e1 + screenWidth + 200) / 400));
+      particleScale = Math.max(0, Math.floor((_visL - 200) / 400));
+      sliderHeight = Math.min(_0x1dce22, Math.floor((_visR + 200) / 400));
     } else if (cd === 0) {
       particleScale = _0x1dce22 + 1;
       sliderHeight = -1;
     } else {
-      const rightEdgeX = _0xa5f1e1 + screenWidth;
+      const rightEdgeX = _visR;
       const centerSection = Math.max(0, Math.floor(rightEdgeX / 400));
       const rangeRadius = cd;
       particleScale = Math.max(0, centerSection - rangeRadius);
@@ -4039,6 +4137,211 @@ window.LevelObject = class LevelObject {
     }
   }
 
+  _getCameraStaticTarget(groupId) {
+    const sprites = this._getUniqueGroupSprites(groupId);
+    const guides = this._cameraGuides?.[groupId];
+    if ((!sprites || !sprites.length) && (!guides || !guides.length)) return null;
+    let sx = 0;
+    let sy = 0;
+    let n = 0;
+    for (const spr of sprites || []) {
+      sx += spr.x;
+      sy += spr.y;
+      n++;
+    }
+    for (const guide of guides || []) {
+      sx += guide.x;
+      sy += guide.y;
+      n++;
+    }
+    // Centre of the group in world/container space - the same space the
+    // camera translation works in, so the static camera can sit on it exactly.
+    return { x: sx / n, y: sy / n };
+  }
+
+  _startCameraTrigger(trig) {
+    if (!trig || !this._isTriggerSaveObjectLive(trig.uid)) return;
+    const fx = this._camFx;
+    const dur = Math.max(0, Number(trig.duration) || 0);
+    const anim = {
+      trig,
+      elapsed: 0,
+      dur,
+      easingType: trig.easingType | 0,
+      easingRate: trig.easingRate || 2
+    };
+    if (trig.kind === 1913) {
+      anim.prop = "zoom";
+      anim.from = fx.zoom;
+      anim.delta = trig.zoom - fx.zoom;
+      // A later zoom replaces the in-flight tween (GD keeps only the newest
+      // per property); otherwise the superseded tween finishes last and
+      // overwrites the newer target - level 22 relies on this (0.909 at
+      // 12570 must yield to 0.6 at 18570).
+      this._activeCameraTweens = this._activeCameraTweens.filter(a => a.prop !== "zoom");
+      this._activeCameraTweens.push(anim);
+    } else if (trig.kind === 1916) {
+      anim.prop = "off";
+      anim.fromX = fx.offX;
+      anim.fromY = fx.offY;
+      // Camera Offset sets an absolute target (levels reset it with (0,0)),
+      // so tween from the current offset toward it. Axis 1 = X only, axis 2 =
+      // Y only; the untouched axis keeps its current value (delta 0).
+      anim.dx = (trig.axis === 2 ? fx.offX : trig.offsetX) - fx.offX;
+      anim.dy = (trig.axis === 1 ? fx.offY : trig.offsetY) - fx.offY;
+      this._activeCameraTweens = this._activeCameraTweens.filter(a => a.prop !== "off");
+      this._activeCameraTweens.push(anim);
+    } else if (trig.kind === 2015) {
+      anim.prop = "rot";
+      anim.from = fx.rot;
+      // Key 68 is in degrees; _camFx.rot lives in radians (Phaser rotation).
+      const targetRot = ((trig.degrees || 0) * Math.PI) / 180;
+      anim.delta = (trig.add ? fx.rot + targetRot : targetRot) - fx.rot;
+      this._activeCameraTweens = this._activeCameraTweens.filter(a => a.prop !== "rot");
+      this._activeCameraTweens.push(anim);
+    } else if (trig.kind === 1914) {
+      // Static locks are per-axis: level 22 locks X and Y with two separate
+      // triggers (4050: axis=2 then axis=1), so each axis keeps its own
+      // target/blend and a release only frees the slots it matches.
+      const locks = fx.locks;
+      const slotOf = (axis) => (axis === 1 ? ["X"] : axis === 2 ? ["Y"] : ["X", "Y"]);
+      const dropTweens = (slot, prop) => {
+        this._activeCameraTweens = this._activeCameraTweens.filter(a => !(a.prop === prop && a.slot === slot));
+      };
+      if (trig.exitStatic) {
+        // A release aimed at another group leaves our locks alone; a groupless
+        // release (no key 71) frees whatever is locked.
+        const targets = ["X", "Y"].filter(
+          s => locks[s] && (!trig.targetGroup || locks[s].targetGroup === trig.targetGroup)
+        );
+        if (!targets.length) return;
+        for (const s of targets) {
+          dropTweens(s, "staticBlend");
+          if (trig.exitInstant || dur <= 0) {
+            dropTweens(s, "staticExit");
+            locks[s] = null;
+          } else {
+            dropTweens(s, "staticExit");
+            this._activeCameraTweens.push({
+              trig, slot: s, elapsed: 0, dur,
+              easingType: anim.easingType, easingRate: anim.easingRate,
+              prop: "staticExit", fromBlend: locks[s].blend
+            });
+          }
+        }
+      } else {
+        const target = this._getCameraStaticTarget(trig.targetGroup);
+        if (!target) return;
+        for (const s of slotOf(trig.axis)) {
+          let lock = locks[s];
+          if (!lock) {
+            lock = { blend: 0, x: target.x, y: target.y, follow: false, targetGroup: 0 };
+            locks[s] = lock;
+          }
+          lock.x = target.x;
+          lock.y = target.y;
+          lock.follow = !!trig.follow;
+          lock.targetGroup = trig.targetGroup || 0;
+          dropTweens(s, "staticBlend");
+          dropTweens(s, "staticExit");
+          this._activeCameraTweens.push({
+            trig, slot: s, elapsed: 0, dur,
+            easingType: anim.easingType, easingRate: anim.easingRate,
+            prop: "staticBlend", from: lock.blend, delta: 1 - lock.blend
+          });
+        }
+      }
+    }
+  }
+
+  checkCameraTriggers(playerX) {
+    if (!this._cameraTriggersSorted) {
+      this._cameraTriggers.sort((a, b) => a.x - b.x);
+      this._cameraTriggersSorted = true;
+    }
+    while (this._cameraTriggerIdx < this._cameraTriggers.length) {
+      const trig = this._cameraTriggers[this._cameraTriggerIdx];
+      if (trig.x > playerX) break;
+      if (!trig.spawnTriggered && !trig.touchTriggered) this._startCameraTrigger(trig);
+      this._cameraTriggerIdx++;
+    }
+  }
+
+  checkTouchCameraTriggers(playerX, playerY) {
+    const px = Number(playerX) || 0;
+    const py = Number(playerY) || 0;
+    this._touchCameraTriggerActivated ||= new Set();
+
+    const playerHalfSize = (typeof playerSize === "number" ? playerSize : 20);
+    const halfHitbox = 30 + playerHalfSize;
+
+    for (const trig of this._cameraTriggers) {
+      if (!trig || !trig.touchTriggered || trig.spawnTriggered || !this._isTriggerSaveObjectLive(trig.uid)) continue;
+      const uid = trig.uid ?? `${trig.x},${trig.y},${trig.kind}`;
+      if (this._touchCameraTriggerActivated.has(uid)) continue;
+      if (Math.abs(px - trig.x) <= halfHitbox && Math.abs(py - (trig.y ?? 0)) <= halfHitbox) {
+        this._touchCameraTriggerActivated.add(uid);
+        this._startCameraTrigger(trig);
+      }
+    }
+  }
+
+  stepCameraTriggers(dt) {
+    const fx = this._camFx;
+    let i = 0;
+    while (i < this._activeCameraTweens.length) {
+      const anim = this._activeCameraTweens[i];
+      anim.elapsed += dt;
+      const progress = anim.dur > 0 ? Math.min(anim.elapsed / anim.dur, 1) : 1;
+      const sample = Easing.sample(anim.easingType, anim.easingRate, progress);
+      if (anim.prop === "zoom") {
+        fx.zoom = anim.from + anim.delta * sample;
+      } else if (anim.prop === "rot") {
+        fx.rot = anim.from + anim.delta * sample;
+      } else if (anim.prop === "off") {
+        fx.offX = anim.fromX + anim.dx * sample;
+        fx.offY = anim.fromY + anim.dy * sample;
+      } else if (anim.prop === "staticBlend") {
+        const lock = fx.locks[anim.slot];
+        if (lock) lock.blend = anim.from + anim.delta * sample;
+      } else if (anim.prop === "staticExit") {
+        const lock = fx.locks[anim.slot];
+        if (lock) lock.blend = anim.fromBlend * (1 - sample);
+      }
+      if (progress >= 1) {
+        if (anim.prop === "staticExit") {
+          const lock = fx.locks[anim.slot];
+          if (lock && lock.blend <= 0.0001) fx.locks[anim.slot] = null;
+        }
+        if (anim.prop === "staticBlend") {
+          const lock = fx.locks[anim.slot];
+          if (lock) lock.blend = 1;
+        }
+        this._activeCameraTweens.splice(i, 1);
+      } else {
+        i++;
+      }
+    }
+    for (const slotName of ["X", "Y"]) {
+      const lock = fx.locks[slotName];
+      if (lock && lock.follow) {
+        const target = this._getCameraStaticTarget(lock.targetGroup);
+        if (target) {
+          lock.x = target.x;
+          lock.y = target.y;
+        }
+      }
+    }
+  }
+
+  resetCameraTriggers() {
+    this._cameraTriggerIdx = 0;
+    this._cameraTriggersSorted = false;
+    this._touchCameraTriggerActivated = new Set();
+    this._activeCameraTweens = [];
+    this._camFx = { zoom: 1, rot: 0, offX: 0, offY: 0, locks: { X: null, Y: null } };
+  }
+
   _activateSpawnedGroup(groupId, colorManager) {
     const targetGroup = parseInt(groupId ?? 0, 10);
     if (!Number.isFinite(targetGroup) || targetGroup <= 0) return;
@@ -4056,6 +4359,7 @@ window.LevelObject = class LevelObject {
       this._activeExitEffect = trig.effect;
     }
     for (const trig of spawnMatches(this._moveTriggers)) this._startMoveTriggerTween(trig);
+    for (const trig of spawnMatches(this._cameraTriggers)) this._startCameraTrigger(trig);
     for (const trig of spawnMatches(this._alphaTriggers)) this._startAlphaTriggerTween(trig);
     for (const trig of spawnMatches(this._rotateTriggers)) this._startRotateTriggerTween(trig);
     for (const trig of spawnMatches(this._pulseTriggers)) this._startPulseTrigger(trig);

@@ -1804,6 +1804,9 @@ class PlayerObject {
       return;
     }
     this._defaultMiniIcon();
+    // Signals game-scene's _applyPlayerFx that fresh screen coords were just
+    // written and still need the camera zoom/rotate pass this frame.
+    this._fxNeedsApply = true;
     const _0x7f0705 = mirrorOffset !== undefined ? mirrorOffset : centerX;
     const _0x1a433c = b(this.p.y) + cameraY;
     const playerRotation = this._rotation;

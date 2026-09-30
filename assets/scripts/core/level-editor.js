@@ -642,6 +642,7 @@ class LevelEditor {
     this._level.resetEnterEffectTriggers();
     this._level.resetSpawnTriggers();
     this._level.resetMoveTriggers();
+    this._level.resetCameraTriggers();
     this._level.resetVisibility();
 
     this._colorManager.reset();

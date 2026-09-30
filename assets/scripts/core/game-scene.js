@@ -7473,6 +7473,7 @@ _showwippopup() {
     this._level.resetEnterEffectTriggers();
     this._level.resetSpawnTriggers();
     this._level.resetMoveTriggers();
+    this._level.resetCameraTriggers();
     this._level.resetVisibility();
     if (this._orbGfx) { this._orbGfx.clear(); }
     this._colorManager.reset();
@@ -7786,6 +7787,7 @@ _showwippopup() {
     this._level.resetEnterEffectTriggers();
     this._level.resetSpawnTriggers();
     this._level.resetMoveTriggers();
+    this._level.resetCameraTriggers();
     this._level.resetVisibility();
     this._level.additiveContainer.x = -this._cameraX;
     this._level.additiveContainer.y = this._cameraY;
@@ -7796,7 +7798,7 @@ _showwippopup() {
     this._level.updateVisibility(this._cameraX);
     this._level.updateObjectDebugIds();
     this._updateBackground();
-    this._applyMirrorEffect();
+    this._applyWorldCameraFx();
     this._practiceBypassPending = false;
     if (window.practiceMusicSync) {
       this._audio.startMusic(this._getSongOffsetForWorldX(checkpoint.x));
@@ -7864,7 +7866,7 @@ _showwippopup() {
       this._level.applyEnterEffects(this._cameraX);
       const _0xde8a1a = this._playerWorldX - this._cameraX;
       this._player.syncSprites(this._cameraX, this._cameraY, 0, this._getMirrorXOffset(_0xde8a1a));
-      this._applyMirrorEffect();
+      this._applyWorldCameraFx();
     }
   }
   _createMirroredBackgroundTexture(textureKey) {
@@ -8174,7 +8176,7 @@ _showwippopup() {
       this._updateBackground();
       this._level.stepGroundAnimation(deltaTime / 1000);
       this._level.updateGroundTiles(this._cameraY);
-      this._applyMirrorEffect();
+      this._applyWorldCameraFx();
       if (this._playerWorldX >= 0) {
         this._slideIn = false;
         this._deltaBuffer = 0;
@@ -8245,6 +8247,7 @@ _showwippopup() {
         this._cameraX = visMaxSection.fromX + (visMaxSection.toX - visMaxSection.fromX) * visMaxSection.p;
         this._cameraY = visMaxSection.fromY + (visMaxSection.toY - visMaxSection.fromY) * visMaxSection.p;
       }
+      this._applyCameraTriggerFx();
       this._cameraXRef._v = this._cameraX;
       this._level.additiveContainer.x = -this._cameraX;
       this._level.additiveContainer.y = this._cameraY;
@@ -8255,7 +8258,7 @@ _showwippopup() {
       this._updateBackground();
       this._level.stepGroundAnimation(deltaTime / 1000);
       this._level.updateGroundTiles(this._cameraY);
-      this._applyMirrorEffect();
+      this._applyWorldCameraFx();
       return;
     }
     if (this._state.isDead) {
@@ -8610,6 +8613,17 @@ _showwippopup() {
         }
       }
     }
+    this._level.checkCameraTriggers(playerX);
+    if (this._level.checkTouchCameraTriggers) {
+      this._level.checkTouchCameraTriggers(playerX, this._state.y);
+      if (this._isDual && !this._state2.isDead) {
+        this._level.checkTouchCameraTriggers(playerX, this._state2.y);
+      }
+    }
+    this._level.stepCameraTriggers(deltaTime / 1000);
+    // Static/Offset must land on _cameraX/_cameraY before the move triggers
+    // sample the camera and before ground/visibility/sprites are laid out.
+    this._applyCameraTriggerFx();
     this._level.checkMoveTriggers(playerX);
     this._level.checkSpawnTriggers(playerX);
     if (this._level.checkTouchSpawnTriggers) {
@@ -8657,37 +8671,192 @@ _showwippopup() {
     if (this._isDual && !this._state2.isDead) {
       this._player2.syncSprites(this._cameraX, this._cameraY, deltaTime / 1000, this._getMirrorXOffset(playerScreenX));
     }
-    this._applyMirrorEffect();
+    this._applyWorldCameraFx();
   }
 
-_applyMirrorEffect() {
+  // Camera FX entry point (was _applyMirrorEffect): lays the world out with
+  // mirror + the camera-trigger zoom/rotation from Level._camFx, all about
+  // the screen centre. At zoom = 1 / rotation = 0 it produces exactly the
+  // legacy translation-only positions.
+  _applyWorldCameraFx() {
+    const fx = this._level?._camFx || { zoom: 1, rot: 0 };
+    const zoomVal = Number(fx.zoom);
+    const z = Number.isFinite(zoomVal) && zoomVal > 0.05 ? Math.min(zoomVal, 8) : 1;
+    const th = Number(fx.rot) || 0;
     const isMirrored = this._state.mirrored;
-    const containers = [this._level.additiveContainer, this._level.container, this._level.topContainer];
-    if (isMirrored) {
-      for (const c of containers) {
-        c.scaleX = -1;
-        c.x = this._cameraX + screenWidth;
+    const sw = screenWidth;
+    const sh = screenHeight;
+    const cx = sw / 2;
+    const cy = sh / 2;
+    const cos = Math.cos(th);
+    const sin = Math.sin(th);
+
+    // Unzoomed world->screen translation (a mirrored view flips X around the
+    // screen width), then zoom/rotate everything about the screen centre:
+    //   screen = C + R(th) * z * (u - C)
+    // which folds into a container as scale = ±z, rotation = th and
+    // position = C + R(th) * z * (t - C).
+    const tx = isMirrored ? sw + this._cameraX : -this._cameraX;
+    const ty = this._cameraY;
+    const dx = (tx - cx) * z;
+    const dy = (ty - cy) * z;
+    const posX = cx + dx * cos - dy * sin;
+    const posY = cy + dx * sin + dy * cos;
+    const scaleX = isMirrored ? -z : z;
+    for (const c of [this._level.additiveContainer, this._level.container, this._level.topContainer]) {
+      c.x = posX;
+      c.y = posY;
+      c.scaleX = scaleX;
+      c.scaleY = z;
+      c.rotation = th;
+    }
+
+    // Ground/ceiling tiles are screen-space images (x = worldX - cameraX):
+    // transform each about the screen centre, scaled around its own origin so
+    // neighbouring tiles stay seamless. Base x is recomputed from _worldX and
+    // base y comes from updateGroundTiles, so repeat runs stay idempotent.
+    const tileW = this._level._tileW || 0;
+    const fxPoint = (ux, uy) => {
+      const ddx = (ux - cx) * z;
+      const ddy = (uy - cy) * z;
+      return { x: cx + ddx * cos - ddy * sin, y: cy + ddx * sin + ddy * cos };
+    };
+    const applyTile = (tile, isCeiling) => {
+      if (!tile) return;
+      let ux = tile._worldX - this._cameraX;
+      if (isMirrored) ux = sw - ux - tileW;
+      const p = fxPoint(ux, tile.y);
+      tile.x = p.x;
+      tile.y = p.y;
+      tile.scaleX = z;
+      let scaleY = z;
+      // Zoom < 1 pulls the rows away from the screen edge; when an un-rotated
+      // row no longer reaches the edge, stretch it vertically just enough to
+      // keep covering it (the fill pattern tolerates the vertical stretch,
+      // but a gap at the edge would be visible). Rotation makes the coverage
+      // analysis 2-D, so only apply it for the flat (theta ~ 0) case, and
+      // never at zoom >= 1 where the old behaviour already covers the edge.
+      if (z < 1 && Math.abs(sin) < 0.001 && cos > 0) {
+        const h = tile.height || 256;
+        if (h > 0) {
+          const need = isCeiling ? p.y / h : (sh - p.y) / h;
+          if (need > scaleY) scaleY = Math.max(need, 0);
+        }
       }
-      for (const tile of this._level._groundTiles) {
-        tile.x = screenWidth - tile.x - this._level._tileW;
-        tile.setFlipX(true);
+      tile.scaleY = scaleY;
+      tile.rotation = th;
+      tile.setFlipX(isMirrored);
+    };
+    for (const tile of this._level._groundTiles || []) applyTile(tile, false);
+    for (const tile of this._level._ceilingTiles || []) applyTile(tile, true);
+    for (const tile of this._level._ground2Tiles || []) applyTile(tile, false);
+    for (const tile of this._level._ceiling2Tiles || []) applyTile(tile, true);
+
+    // Ground/ceiling separator lines and edge shadows get the same
+    // screen-space transform; x is captured once because it is only set on
+    // build/resize, while y is rewritten by updateGroundTiles every frame.
+    const applyScreenObj = (obj) => {
+      if (!obj) return;
+      if (obj._fxBaseX === undefined) obj._fxBaseX = obj.x;
+      const p = fxPoint(obj._fxBaseX, obj.y);
+      obj.x = p.x;
+      obj.y = p.y;
+      obj.rotation = th;
+    };
+    applyScreenObj(this._level._groundLine);
+    applyScreenObj(this._level._ceilingLine);
+    applyScreenObj(this._level._groundShadowL);
+    applyScreenObj(this._level._groundShadowR);
+    applyScreenObj(this._level._ceilingShadowL);
+    applyScreenObj(this._level._ceilingShadowR);
+
+    // Background: rotate about the screen centre (with origin (0,0) that means
+    // sitting at C - R(th)*C), scale the pattern for zoom, and enlarge the
+    // sprite enough to still cover the corners while rotated.
+    const bg = this._bg;
+    if (bg) {
+      bg.setFlipX(isMirrored);
+      bg.setPosition(cx - (cx * cos - cy * sin), cy - (cx * sin + cy * cos));
+      bg.rotation = th;
+      let cover = 1;
+      if (th !== 0) {
+        cover = Math.max(
+          (Math.abs(sw * cos) + Math.abs(sh * sin)) / sw,
+          (Math.abs(sw * sin) + Math.abs(sh * cos)) / sh
+        );
       }
-      for (const tile of this._level._ceilingTiles) {
-        tile.x = screenWidth - tile.x - this._level._tileW;
-        tile.setFlipX(true);
-      }
-    } else {
-      for (const c of containers) {
-        if (c.scaleX !== 1) c.scaleX = 1;
-      }
-      for (const tile of this._level._groundTiles) {
-        tile.setFlipX(false);
-      }
-      for (const tile of this._level._ceilingTiles) {
-        tile.setFlipX(false);
+      bg.setScale(cover);
+      // TileSprite exposes pattern scale as tileScaleX/tileScaleY (no
+      // `tileScale` vector); track world zoom so the BG pattern stays glued
+      // to the shrinking world instead of keeping its z=1 sizing.
+      bg.tileScaleX = z / cover;
+      bg.tileScaleY = z / cover;
+    }
+
+    this._applyPlayerFx();
+  }
+
+  // Folds Camera Static (per-axis blend toward a locked world point) and
+  // Camera Offset into _cameraX/_cameraY once the follow-camera has been
+  // computed for the frame. A static centreplaces its target on screen, so it
+  // replaces the camera position on that axis rather than adding to it;
+  // offset shifts it afterwards.
+  _applyCameraTriggerFx() {
+    const fx = this._level?._camFx;
+    if (!fx) return;
+    let camX = this._cameraX;
+    let camY = this._cameraY;
+    const locks = fx.locks;
+    const lockX = locks && locks.X;
+    const lockY = locks && locks.Y;
+    if (lockX && lockX.blend > 0) {
+      // Container maps world x to screen as u = worldX - cameraX, so centring
+      // the target means cameraX = targetX - screenW/2.
+      const staticCamX = lockX.x - screenWidth / 2;
+      camX = camX + (staticCamX - camX) * Math.min(1, lockX.blend);
+    }
+    if (lockY && lockY.blend > 0) {
+      // Containers map world y to screen as u = y + cameraY, so centring
+      // the target means cameraY = screenH/2 - targetY.
+      const staticCamY = screenHeight / 2 - lockY.y;
+      camY = camY + (staticCamY - camY) * Math.min(1, lockY.blend);
+    }
+    camX += fx.offX || 0;
+    camY += fx.offY || 0;
+    this._cameraX = camX;
+    this._cameraY = camY;
+    this._cameraXRef._v = camX;
+  }
+
+  // The player icon is drawn in screen space by syncSprites (its sprites are
+  // scene-level, not inside the world containers), so it needs the same
+  // zoom/rotate pass once positioned. syncSprites raises _fxNeedsApply;
+  // consuming the flag here keeps the pass safe however often it runs.
+  _applyPlayerFx() {
+    for (const pl of [this._player, this._player2]) {
+      if (!pl || !pl._fxNeedsApply) continue;
+      pl._fxNeedsApply = false;
+      const fx = this._level?._camFx;
+      const zoomVal = fx ? Number(fx.zoom) : 1;
+      const z = Number.isFinite(zoomVal) && zoomVal > 0.05 ? Math.min(zoomVal, 8) : 1;
+      const th = fx ? (Number(fx.rot) || 0) : 0;
+      if ((z === 1 && th === 0) || !pl._allLayers) continue;
+      const cx = screenWidth / 2;
+      const cy = screenHeight / 2;
+      const cos = Math.cos(th);
+      const sin = Math.sin(th);
+      for (const layer of pl._allLayers) {
+        const spr = layer && layer.sprite;
+        if (!spr || !spr.visible) continue;
+        const dx = (spr.x - cx) * z;
+        const dy = (spr.y - cy) * z;
+        spr.x = cx + dx * cos - dy * sin;
+        spr.y = cy + dx * sin + dy * cos;
+        spr.scaleX *= z;
+        spr.scaleY *= z;
+        spr.rotation += th;
       }
     }
-    this._bg.setFlipX(isMirrored);
   }
   _getDualSharedSignature(state) {
     if (!state) return "0|0";
