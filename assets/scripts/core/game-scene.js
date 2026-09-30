@@ -3838,20 +3838,27 @@ this._menuUpdateLogBtn = this.add.image(screenWidth - 30 - 50, 33, "GJ_WebSheet"
         this._hideStatsScreen();
         return;
       }
+      if (this._confirmExitPopup) {
+        // ESC cancels the confirmation and leaves the player paused.
+        this._closeConfirmExitPopup();
+        return;
+      }
       if (this._paused) {
-        this._audio.playEffect("quitSound_01");
-        this._audio.stopMusic();
-        if (this._isMainLevelForCoinDisplay()) {
-          window._mainLevelReturnToSelect = true;
+        if (window.confirmExit === false) {
+          this._quitLevelFromEsc();
+        } else {
+          this._showConfirmExitPopup();
         }
-        this._resumeGame();
-        this.scene.restart();
       } else if (!this._menuActive && !this._slideIn && !this._levelWon) {
         this._pauseGame();
       }
     });
     this._restartKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this._restartKey.on("down", () => {
+      if (this._confirmExitPopup) {
+        // The exit confirmation is modal; R must not reset the level behind it.
+        return;
+      }
       if (!this._menuActive && !this._slideIn && !this._levelWon && !this._menuActive) {
         this._restartLevel();
       }
@@ -3884,6 +3891,12 @@ this._menuUpdateLogBtn = this.add.image(screenWidth - 30 - 50, 33, "GJ_WebSheet"
       }
     });
     this._paused = false;
+    if (this._confirmExitPopup) {
+      // A restart with the exit confirmation open must not inherit the stale
+      // overlay reference (the container may already be gone).
+      try { this._confirmExitPopup.destroy(); } catch (e) { /* already torn down */ }
+      this._confirmExitPopup = null;
+    }
     this._pauseContainer = null;
     this._sfxVolume = localStorage.getItem("userSfxVol") ?? 1;
     this._initMacroBot();
@@ -5350,13 +5363,22 @@ _buildSettingsPopup() {
             "Noclip Accuracy"
         );
         
-        createToggle(container, column1X, startY + (spacingY * 5), "Macro Bot",
-            () => window.macroBot,
+        createToggle(container, column1X, startY + (spacingY * 5), "Macro Bot", 
+            () => window.macroBot, 
             (v) => window.macroBot = v,
             null,
             25,
             true,
             "Macro Bot"
+        );
+
+        createToggle(container, column2X, startY + (spacingY * 2), "Confirm Exit",
+            () => window.confirmExit !== false,
+            (v) => window.confirmExit = v,
+            null,
+            25,
+            true,
+            "Confirm Exit"
         );
 
         createNumberInput(container, column2X, startY, "Speedhack", 
@@ -5574,6 +5596,7 @@ _buildSettingsPopup() {
         showCPS: window.showCPS,
         speedHack: window.speedHack,
         macroBot: window.macroBot,
+        confirmExit: window.confirmExit !== false,
         practiceMusicSync: window.practiceMusicSync,
         showGlow: window.showGlow,
         showEditorGlow: window.showEditorGlow,
@@ -5606,6 +5629,7 @@ _buildSettingsPopup() {
         showCPS: false,
         speedHack: 1.0,
         macroBot: false,
+        confirmExit: true,
         practiceMusicSync: false,
         showGlow: true,
         showEditorGlow: false,
@@ -5635,6 +5659,8 @@ _buildSettingsPopup() {
     // step (no-op for menu music, which stays at 1x).
     this._audio?.applySpeedHackRate?.();
     window.macroBot = data.macroBot;
+    // Default ON: ESC while paused must ask before it throws away the run.
+    window.confirmExit = data.confirmExit !== false;
     window.practiceMusicSync = !!data.practiceMusicSync;
     window.showGlow = data.showGlow;
     window.showEditorGlow = data.showEditorGlow;
@@ -5648,6 +5674,73 @@ _buildSettingsPopup() {
     window.useDirectInternet = !!data.useDirectInternet;
     localStorage.setItem("gd_useDirectInternet", String(!!window.useDirectInternet));
     window.enableLDM = !!data.enableLDM;
+  }
+  // ESC while paused asks first (Confirm Exit setting, default ON) so a
+  // double-tap can't throw the run away; the explicit pause-menu quit button
+  // still exits directly.
+  _showConfirmExitPopup() {
+    if (this._confirmExitPopup) return;
+    const xPos = screenWidth / 2;
+    const centerY = screenHeight / 2;
+    this._confirmExitPopup = this.add.container(0, 0).setScrollFactor(0).setDepth(1000);
+    const background = this.add.rectangle(xPos, centerY, screenWidth, screenHeight, 0, 100 / 255);
+    background.setInteractive();
+    this._confirmExitPopup.add(background);
+    const bounceContainer = this.add.container(xPos, centerY).setScale(0);
+    this._confirmExitPopup.add(bounceContainer);
+    const cornerRadius = this.textures.get("square01_001").source[0].width * 0.325;
+    bounceContainer.add(this._drawScale9(0, 0, 560, 260, "square01_001", cornerRadius, 16777215, 1));
+    bounceContainer.add(this.add.bitmapText(0, -92, "goldFont", "Exit Level", 42).setOrigin(0.5, 0.5));
+    bounceContainer.add(this.add.text(0, -18, "Are you sure you want to\nexit the level?", {
+      fontSize: "25px",
+      fontFamily: "Arial, sans-serif",
+      color: "#ffffff",
+      align: "center",
+      lineSpacing: 4
+    }).setOrigin(0.5, 0.5));
+
+    const makeButton = (x, label, labelTextSize, onClick) => {
+      const group = this.add.container(x, 75);
+      const btnW = 165, btnH = 55;
+      const border = this.textures.get("GJ_button01").source[0].width * 0.3;
+      group.add(this._drawScale9(0, 0, btnW, btnH, "GJ_button01", border, 0xffffff, 1));
+      const hit = this.add.rectangle(0, 0, btnW, btnH).setInteractive();
+      group.add(hit);
+      group.add(this.add.bitmapText(-2, -3, "goldFont", label, labelTextSize).setOrigin(0.5, 0.5));
+      bounceContainer.add(group);
+      hit.on("pointerdown", () => { group._pressed = true; this.tweens.killTweensOf(group); this.tweens.add({ targets: group, scaleX: 1.26, scaleY: 1.26, duration: 300, ease: "Bounce.Out" }); });
+      hit.on("pointerout", () => { if (group._pressed) { group._pressed = false; this.tweens.killTweensOf(group); this.tweens.add({ targets: group, scaleX: 1, scaleY: 1, duration: 400, ease: "Bounce.Out" }); } });
+      hit.on("pointerup", () => { if (group._pressed) { group._pressed = false; this.tweens.killTweensOf(group); group.setScale(1); onClick(); } });
+    };
+
+    makeButton(-90, "Cancel", 38, () => this._closeConfirmExitPopup());
+    makeButton(90, "Exit", 39, () => {
+      this._closeConfirmExitPopup();
+      this._quitLevelFromEsc();
+    });
+
+    this.tweens.add({
+      targets: bounceContainer,
+      scale: { from: 0, to: 1 },
+      duration: 660,
+      ease: "Elastic.Out",
+      easeParams: [1, 0.6]
+    });
+  }
+  _closeConfirmExitPopup() {
+    if (this._confirmExitPopup) {
+      this._confirmExitPopup.destroy();
+      this._confirmExitPopup = null;
+    }
+  }
+  _quitLevelFromEsc() {
+    this._audio.playEffect("quitSound_01");
+    this._audio.stopMusic();
+    if (this._isMainLevelForCoinDisplay()) {
+      window._mainLevelReturnToSelect = true;
+    }
+    this._resumeGame();
+    this.scene.restart();
   }
   _buildMacroPopup() {
       if (this._macroPopup) return;
@@ -5692,8 +5785,9 @@ _buildSettingsPopup() {
       const createBtn = this.add.image(centerX, centerY + 20, "GJ_GameSheet03", "GJ_plusBtn_001.png").setInteractive().setScale(1.2);
       const playbackBtn = this.add.image(centerX + 150, centerY + 20, this._macroBot?.playing ? "stopPlayback" : "playbackMacro").setInteractive().setScale(0.25);
       const recordBtn = this.add.image(centerX + 300, centerY + 20, this._macroBot?.recording ? "stopRecord" : "recordMacro").setInteractive().setScale(0.25);
+      const clearBtn = this.add.image(centerX, centerY + 110, "GJ_GameSheet03", "GJ_trashBtn_001.png").setInteractive().setScale(0.55);
 
-      this._macroPopup.add([createBtn, importBtn, exportBtn, playbackBtn, recordBtn]);
+      this._macroPopup.add([createBtn, importBtn, exportBtn, playbackBtn, recordBtn, clearBtn]);
 
       this._refreshMacroButtons = () => {
           const playing = !!this._macroBot?.playing;
@@ -5731,6 +5825,7 @@ _buildSettingsPopup() {
           exportBtn.setAlpha((playing || recording || !this._macroLoaded) ? 0.5 : 1);
           playbackBtn.setAlpha((recording || !this._macroLoaded) ? 0.5 : 1);
           recordBtn.setAlpha((playing || !this._macroLoaded) ? 0.5 : 1);
+          clearBtn.setAlpha((playing || recording || !this._macroLoaded) ? 0.5 : 1);
       };
 
       this._refreshMacroButtons();
@@ -5790,6 +5885,16 @@ _buildSettingsPopup() {
               const macro = this._macroBot.exportObject();
               this._startMacroPlayback(macro);
           }
+          this._refreshMacroButtons();
+      });
+
+      this._makeBouncyButton(clearBtn, 0.55, () => {
+          // Drop the loaded macro entirely - frames, playback cursor and name.
+          if (this._macroBot?.playing || this._macroBot?.recording) return;
+          if (!this._macroLoaded) return;
+          this._macroBot?.resetAll();
+          this._macroName = null;
+          this._macroLoaded = false;
           this._refreshMacroButtons();
       });
 
@@ -7979,7 +8084,21 @@ _showwippopup() {
     this._deltaBuffer = _0x578d1b - _0xd8019e;
     return _0xd8019e * 60;
   }
+  // The system cursor is hidden only while actually playing: menus, the pause
+  // screen (and the exit confirmation on it), win screens and the editor keep
+  // it so every button stays clickable.
+  _syncGameplayCursor() {
+    const canvas = this.game && this.game.canvas;
+    if (!canvas) return;
+    const inGameplay = !!this._startGame && !this._menuActive && !this._paused &&
+      !this._levelWon && !window.isEditor;
+    const want = inGameplay ? "none" : "default";
+    if (canvas.style.cursor !== want) {
+      canvas.style.cursor = want;
+    }
+  }
   update(_0x54fa47, deltaTime) {
+    this._syncGameplayCursor();
     if (window.isEditor) {
         if (this._editorPlaytestActive && !this._editorPlaytestPaused) {
             this._levelEditor._updateEditorPlaytest(deltaTime);
